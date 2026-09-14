@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Charles MCP і Kiro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Standalone reset: the published artifact gets this from its host wrapper. */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body { margin: 0; }
+  img { max-width: 100%; }
+
+  :root {
+    --bg: #F4F6F6;
+    --surface: #FFFFFF;
+    --surface-2: #EAEFEF;
+    --ink: #10181B;
+    --muted: #57696F;
+    --line: #D2DCDD;
+    --line-strong: #B3C2C4;
+    --real: #0E7C76;
+    --mock: #C75300;
+    --shadow: 0 1px 2px rgba(16, 24, 27, .06), 0 8px 24px rgba(16, 24, 27, .05);
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --display: "Archivo", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0D1416;
+      --surface: #131C1F;
+      --surface-2: #182327;
+      --ink: #E4EDEE;
+      --muted: #93A7AC;
+      --line: #26343A;
+      --line-strong: #3A4C53;
+      --real: #45BCB2;
+      --mock: #FFA24D;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0D1416;
+    --surface: #131C1F;
+    --surface-2: #182327;
+    --ink: #E4EDEE;
+    --muted: #93A7AC;
+    --line: #26343A;
+    --line-strong: #3A4C53;
+    --real: #45BCB2;
+    --mock: #FFA24D;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1060px; margin: 0 auto; padding: 48px 24px 96px; display: flex; flex-direction: column; gap: 56px; }
+  .prose { max-width: 68ch; }
+
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -.015em; }
+  h1 { font-size: clamp(30px, 4.4vw, 44px); line-height: 1.08; font-weight: 700; }
+  h2 { font-size: clamp(22px, 2.6vw, 27px); line-height: 1.15; font-weight: 600; }
+  h3 { font-size: 17px; line-height: 1.3; font-weight: 600; }
+  p { margin: 0; }
+  a { color: var(--real); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--real); outline-offset: 3px; border-radius: 3px; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 14px;
+  }
+  code, .mono { font-family: var(--mono); font-size: .89em; }
+  p code, li code, td code { background: var(--surface-2); border-radius: 4px; padding: .1em .35em; }
+
+  header .lede { font-size: 18px; color: var(--muted); margin-top: 16px; }
+  .chain {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    margin-top: 26px; font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+  }
+  .chain span { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; color: var(--ink); }
+  .chain b { color: var(--muted); font-weight: 400; }
+
+  section { display: flex; flex-direction: column; gap: 20px; }
+  .section-head { display: flex; flex-direction: column; gap: 10px; max-width: 68ch; }
+
+  figure { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+  .canvas {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px; overflow-x: auto; box-shadow: var(--shadow);
+  }
+  .canvas svg { display: block; width: 100%; min-width: 660px; height: auto; }
+  figcaption { font-size: 14px; color: var(--muted); max-width: 72ch; }
+
+  /* Diagram encoding: structure inherits the theme, hues carry meaning. */
+  .d-box { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1.2; }
+  .d-box-plain { fill: none; stroke: var(--line-strong); stroke-width: 1.2; stroke-dasharray: 4 4; }
+  .d-title { fill: var(--ink); font-family: var(--sans); font-size: 14px; font-weight: 600; }
+  .d-sub { fill: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+  .d-edge { stroke: var(--line-strong); stroke-width: 1.6; fill: none; }
+  .d-real { stroke: var(--real); stroke-width: 1.8; fill: none; }
+  .d-mock { stroke: var(--mock); stroke-width: 1.8; fill: none; }
+  .d-real-t { fill: var(--real); font-family: var(--mono); font-size: 11.5px; }
+  .d-mock-t { fill: var(--mock); font-family: var(--mono); font-size: 11.5px; }
+  .d-head-real { fill: var(--real); }
+  .d-head-mock { fill: var(--mock); }
+  .d-head { fill: var(--line-strong); }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .note {
+    border-left: 3px solid var(--mock); background: var(--surface); border-radius: 0 8px 8px 0;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .note h3 { font-family: var(--sans); font-size: 15px; }
+  .note p { font-size: 14.5px; color: var(--muted); }
+
+  ol.steps { list-style: none; counter-reset: step; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+  ol.steps > li {
+    counter-increment: step; position: relative; padding: 18px 20px 18px 58px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  ol.steps > li::before {
+    content: counter(step); position: absolute; left: 18px; top: 18px;
+    font-family: var(--mono); font-size: 12px; font-weight: 500;
+    width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center;
+    background: var(--surface-2); color: var(--muted); border: 1px solid var(--line);
+  }
+  ol.steps h3 { font-family: var(--sans); font-size: 15.5px; }
+  ol.steps p { font-size: 14.5px; color: var(--muted); }
+  ol.steps ul { margin: 0; padding-left: 18px; font-size: 14.5px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
+
+  pre {
+    margin: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+    color: var(--ink);
+  }
+  pre .c { color: var(--muted); }
+  pre .k { color: var(--real); }
+  pre .m { color: var(--mock); }
+
+  footer { border-top: 1px solid var(--line); padding-top: 20px; font-size: 14px; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <p class="eyebrow">charles-mcp · мобільне QA</p>
+    <h1>Як агент читає трафік застосунку і підміняє відповіді</h1>
+    <p class="lede prose">Charles записує трафік телефона. MCP-сервер читає ту саму сесію і кладе на диск правила, за якими відповідь приходить уже зміненою — без перезбирання застосунку і без правок на бекенді.</p>
+    <div class="chain">
+      <span>Застосунок</span><b>→</b><span>Charles :8888</span><b>→</b><span>диспетчер :18080</span><b>→</b><span>сервер</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="section-head">
+      <h2>Перехоплення: дві площини</h2>
+      <p class="prose">Трафік застосунку і робота агента — це два різні шляхи до одного Charles. Застосунок ходить через проксі, агент читає сесію через Web Interface. Агент ніколи не перехоплює трафік сам.</p>
+    </div>
+    <figure>
+      <div class="canvas">
+        <svg viewBox="0 0 900 330" role="img" aria-label="Трафік застосунку йде через Charles на справжній сервер; окремо charles-mcp читає ту саму сесію через Web Interface і приймає замаплений трафік на порт 18080">
+          <defs>
+            <marker id="a-plain" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,1 10,5 0,9" class="d-head"></polygon>
+            </marker>
+            <marker id="a-real" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,1 10,5 0,9" class="d-head-real"></polygon>
+            </marker>
+            <marker id="a-mock" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,1 10,5 0,9" class="d-head-mock"></polygon>
+            </marker>
+          </defs>
+
+          <text x="24" y="28" class="d-sub">ПЛОЩИНА ТРАФІКУ</text>
+          <rect x="24" y="44" width="150" height="76" rx="8" class="d-box"></rect>
+          <text x="99" y="76" text-anchor="middle" class="d-title">Застосунок</text>
+          <text x="99" y="96" text-anchor="middle" class="d-sub">телефон, симулятор</text>
+
+          <line x1="176" y1="96" x2="296" y2="96" class="d-real" marker-end="url(#a-real)"></line>
+          <text x="236" y="70" text-anchor="middle" class="d-real-t">Wi-Fi проксі</text>
+          <text x="236" y="86" text-anchor="middle" class="d-real-t">192.168.x.x:8888</text>
+
+          <rect x="300" y="36" width="212" height="112" rx="8" class="d-box"></rect>
+          <text x="406" y="66" text-anchor="middle" class="d-title">Charles Proxy</text>
+          <text x="406" y="88" text-anchor="middle" class="d-sub">SSL Proxying + сертифікат</text>
+          <text x="406" y="106" text-anchor="middle" class="d-sub">запис сесії</text>
+          <text x="406" y="124" text-anchor="middle" class="d-sub">Map Local / Map Remote</text>
+
+          <line x1="514" y1="96" x2="664" y2="96" class="d-real" marker-end="url(#a-real)"></line>
+          <text x="589" y="86" text-anchor="middle" class="d-real-t">HTTPS</text>
+
+          <rect x="668" y="44" width="196" height="76" rx="8" class="d-box"></rect>
+          <text x="766" y="76" text-anchor="middle" class="d-title">Справжній сервер</text>
+          <text x="766" y="96" text-anchor="middle" class="d-sub">api.example.com</text>
+
+          <line x1="356" y1="206" x2="356" y2="154" class="d-edge" marker-end="url(#a-plain)"></line>
+          <text x="346" y="176" text-anchor="end" class="d-sub">читає сесію</text>
+          <text x="346" y="192" text-anchor="end" class="d-sub">control.charles</text>
+
+          <path d="M 462 154 L 462 204" class="d-mock" marker-end="url(#a-mock)"></path>
+          <text x="474" y="176" class="d-mock-t">Map Remote</text>
+          <text x="474" y="192" class="d-mock-t">→ :18080</text>
+
+          <text x="24" y="196" class="d-sub">ПЛОЩИНА АГЕНТА</text>
+          <rect x="24" y="212" width="150" height="76" rx="8" class="d-box"></rect>
+          <text x="99" y="244" text-anchor="middle" class="d-title">Kiro</text>
+          <text x="99" y="264" text-anchor="middle" class="d-sub">MCP-клієнт</text>
+
+          <line x1="176" y1="250" x2="296" y2="250" class="d-edge" marker-end="url(#a-plain)"></line>
+          <text x="236" y="240" text-anchor="middle" class="d-sub">stdio</text>
+
+          <rect x="300" y="208" width="212" height="96" rx="8" class="d-box"></rect>
+          <text x="406" y="238" text-anchor="middle" class="d-title">charles-mcp</text>
+          <text x="406" y="260" text-anchor="middle" class="d-sub">інструменти аналізу</text>
+          <text x="406" y="278" text-anchor="middle" class="d-sub">диспетчер :18080</text>
+
+          <polyline points="516,250 760,250 760,128" class="d-mock" marker-end="url(#a-mock)"></polyline>
+          <text x="640" y="240" text-anchor="middle" class="d-mock-t">режим patch → справжній сервер</text>
+        </svg>
+      </div>
+      <figcaption>Бірюзовий — шлях справжнього трафіку, охра — те, що проходить через підміну. Без SSL Proxying Charles бачить лише тунель до хоста, не знає шляху запиту, і жодне правило за шляхом не спрацює.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Три джерела відповіді</h2>
+      <p class="prose">Один і той самий запит застосунку може бути обслужений із трьох місць. Заголовок у відповіді завжди каже, звідки вона прийшла — це і є перевірка, що мок спрацював.</p>
+    </div>
+    <figure>
+      <div class="canvas">
+        <svg viewBox="0 0 900 400" role="img" aria-label="Запит потрапляє в Charles і далі йде або на справжній сервер, або у файл Map Local, або в локальний диспетчер, кожен варіант позначений своїм заголовком відповіді">
+          <rect x="20" y="168" width="140" height="68" rx="8" class="d-box"></rect>
+          <text x="90" y="196" text-anchor="middle" class="d-title">Запит</text>
+          <text x="90" y="216" text-anchor="middle" class="d-sub">POST /api/…</text>
+
+          <line x1="162" y1="202" x2="216" y2="202" class="d-edge" marker-end="url(#a-plain)"></line>
+
+          <rect x="220" y="160" width="132" height="84" rx="8" class="d-box"></rect>
+          <text x="286" y="192" text-anchor="middle" class="d-title">Charles</text>
+          <text x="286" y="212" text-anchor="middle" class="d-sub">правила</text>
+          <text x="286" y="228" text-anchor="middle" class="d-sub">мапінгу</text>
+
+          <path d="M 354 186 C 400 186 400 76 446 76" class="d-real" marker-end="url(#a-real)"></path>
+          <text x="400" y="60" text-anchor="middle" class="d-real-t">немає правила</text>
+
+          <rect x="450" y="44" width="196" height="64" rx="8" class="d-box-plain"></rect>
+          <text x="548" y="70" text-anchor="middle" class="d-title">Справжній сервер</text>
+          <text x="548" y="90" text-anchor="middle" class="d-sub">відповідь без змін</text>
+
+          <line x1="354" y1="202" x2="446" y2="202" class="d-mock" marker-end="url(#a-mock)"></line>
+          <text x="400" y="192" text-anchor="middle" class="d-mock-t">Map Local</text>
+
+          <rect x="450" y="170" width="196" height="64" rx="8" class="d-box"></rect>
+          <text x="548" y="196" text-anchor="middle" class="d-title">Файл на диску</text>
+          <text x="548" y="216" text-anchor="middle" class="d-sub">завжди 200</text>
+
+          <path d="M 354 220 C 400 220 400 330 446 330" class="d-mock" marker-end="url(#a-mock)"></path>
+          <text x="400" y="348" text-anchor="middle" class="d-mock-t">Map Remote</text>
+
+          <rect x="450" y="286" width="196" height="88" rx="8" class="d-box"></rect>
+          <text x="548" y="314" text-anchor="middle" class="d-title">Диспетчер :18080</text>
+          <text x="548" y="334" text-anchor="middle" class="d-sub">fixture · patch</text>
+          <text x="548" y="352" text-anchor="middle" class="d-sub">passthrough</text>
+
+          <line x1="650" y1="76" x2="702" y2="76" class="d-edge" marker-end="url(#a-plain)"></line>
+          <line x1="650" y1="202" x2="702" y2="202" class="d-edge" marker-end="url(#a-plain)"></line>
+          <line x1="650" y1="330" x2="702" y2="330" class="d-edge" marker-end="url(#a-plain)"></line>
+
+          <text x="706" y="64" class="d-sub">заголовка немає</text>
+          <text x="706" y="82" class="d-sub">— відповідь справжня</text>
+
+          <text x="706" y="190" class="d-mock-t">X-Charles-Map-Local</text>
+          <text x="706" y="208" class="d-sub">шлях до файлу</text>
+
+          <text x="706" y="318" class="d-mock-t">X-Charles-MCP-Rule</text>
+          <text x="706" y="336" class="d-sub">id правила або</text>
+          <text x="706" y="354" class="d-sub">passthrough</text>
+        </svg>
+      </div>
+      <figcaption>Map Local відповідає файлом і завжди кодом 200, ігноруючи метод і query. Диспетчер розрізняє варіанти одного URL за тілом запиту і вміє будь-який код відповіді.</figcaption>
+    </figure>
+
+    <div class="grid-2">
+      <div class="note">
+        <h3>Коли вистачає Map Local</h3>
+        <p>Один URL — одна відповідь, зазвичай GET. Charles віддає файл сам, окремий процес не потрібен.</p>
+      </div>
+      <div class="note">
+        <h3>Коли потрібен диспетчер</h3>
+        <p>Один URL відповідає по-різному залежно від поля тіла, потрібен код помилки, затримка або правка запиту.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Що вміє одне правило</h2>
+      <p class="prose">Правило — це JSON-файл у каталозі моків поза репозиторієм. Диспетчер перечитує його на кожен запит, тому правка діє одразу, без перезапуску Charles.</p>
+    </div>
+    <figure>
+      <div class="canvas">
+        <svg viewBox="0 0 900 340" role="img" aria-label="Диспетчер звіряє метод, шлях і поле action у тілі запиту, після чого віддає збережену фікстуру, або йде на справжній сервер і править відповідь, або пропускає запит без змін">
+          <rect x="20" y="120" width="180" height="100" rx="8" class="d-box"></rect>
+          <text x="110" y="150" text-anchor="middle" class="d-title">Запит</text>
+          <text x="110" y="172" text-anchor="middle" class="d-sub">POST /api/*/wallet</text>
+          <text x="110" y="192" text-anchor="middle" class="d-sub">{"action":"init"}</text>
+
+          <line x1="202" y1="170" x2="256" y2="170" class="d-edge" marker-end="url(#a-plain)"></line>
+
+          <rect x="260" y="88" width="210" height="164" rx="8" class="d-box"></rect>
+          <text x="365" y="118" text-anchor="middle" class="d-title">Звіряння правила</text>
+          <text x="276" y="146" class="d-sub">метод POST</text>
+          <text x="276" y="168" class="d-sub">шлях /api/*/wallet</text>
+          <text x="276" y="190" class="d-sub">тіло /action = init</text>
+          <text x="276" y="212" class="d-sub">query, заголовки</text>
+          <text x="276" y="236" class="d-sub">priority, host</text>
+
+          <path d="M 472 130 C 520 130 520 58 568 58" class="d-mock" marker-end="url(#a-mock)"></path>
+          <rect x="572" y="28" width="300" height="60" rx="8" class="d-box"></rect>
+          <text x="592" y="54" class="d-title">fixture</text>
+          <text x="592" y="74" class="d-sub">збережене тіло, будь-який код, без сервера</text>
+
+          <line x1="472" y1="170" x2="568" y2="170" class="d-mock" marker-end="url(#a-mock)"></line>
+          <rect x="572" y="126" width="300" height="88" rx="8" class="d-box"></rect>
+          <text x="592" y="152" class="d-title">patch</text>
+          <text x="592" y="172" class="d-sub">відповідає справжній сервер</text>
+          <text x="592" y="190" class="d-sub">правки полів, код, delay_ms</text>
+          <text x="592" y="208" class="d-sub">заголовки запиту</text>
+
+          <path d="M 472 210 C 520 210 520 282 568 282" class="d-real" marker-end="url(#a-real)"></path>
+          <rect x="572" y="252" width="300" height="60" rx="8" class="d-box-plain"></rect>
+          <text x="592" y="278" class="d-title">passthrough</text>
+          <text x="592" y="298" class="d-sub">правило не підійшло — нічого не міняємо</text>
+        </svg>
+      </div>
+      <figcaption>Інші <code>action</code> того самого URL ідуть на сервер без змін: мокається рівно те, що попросили.</figcaption>
+    </figure>
+
+    <div class="grid-2">
+      <div>
+        <h3 style="margin-bottom:10px">Правка знаходить елемент за полем</h3>
+        <pre><span class="c">// баланси приходять у різному порядку,</span>
+<span class="c">// тому індекс /balanceList/1 — пастка</span>
+{
+  <span class="k">"op"</span>: <span class="m">"set"</span>,
+  <span class="k">"path"</span>: <span class="m">"/data/balanceList/[currency=USD]/balance"</span>,
+  <span class="k">"value"</span>: <span class="m">"1000.00"</span>
+}</pre>
+      </div>
+      <div>
+        <h3 style="margin-bottom:10px">Шлях не прибитий до платформи</h3>
+        <pre><span class="c">// один запис правила на Android і iOS</span>
+<span class="k">"match"</span>: {
+  <span class="k">"method"</span>: <span class="m">"POST"</span>,
+  <span class="k">"path"</span>: <span class="m">"/api/*/wallet"</span>,
+  <span class="k">"body"</span>: { <span class="k">"/action"</span>: <span class="m">"init"</span> }
+}</pre>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Налаштування Kiro</h2>
+      <p class="prose">Kiro запускає MCP-сервер по stdio сам. Конфіг кладеться у проєкт або до користувача; за розбіжності виграє проєктний.</p>
+    </div>
+
+    <ol class="steps">
+      <li>
+        <h3>Увімкнути Web Interface у Charles</h3>
+        <p><code>Proxy → Web Interface Settings</code>: позначити <code>Enable web interface</code>, задати свої логін і пароль. <code>Allow anonymous access</code> не вмикати — через цей інтерфейс читається вся сесія.</p>
+      </li>
+      <li>
+        <h3>Підключити пристрій і сертифікат</h3>
+        <ul>
+          <li>На телефоні: проксі Wi-Fi → IP комп'ютера, порт <code>8888</code>.</li>
+          <li>У Charles дозволити пристрій: <code>Proxy → Access Control Settings</code>.</li>
+          <li><code>Proxy → SSL Proxying Settings</code> — додати хости API, на пристрій поставити сертифікат Charles і довірити його.</li>
+        </ul>
+        <p>Без цього кроку інструменти бачитимуть тільки хости без шляхів.</p>
+      </li>
+      <li>
+        <h3>Поставити форк</h3>
+        <p>Пакет у PyPI — це upstream без інструментів моків, тому ставимо з репозиторію команди.</p>
+        <pre>git clone https://github.com/ExQA/charles-mcp.git
+cd charles-mcp
+uv sync --locked --extra dev
+uv run python -m pytest -q</pre>
+      </li>
+      <li>
+        <h3>Додати сервер у конфіг Kiro</h3>
+        <p>Проєктний файл <code>.kiro/settings/mcp.json</code> або користувацький <code>~/.kiro/settings/mcp.json</code>. Якщо файл уже є — додати ключ <code>charles</code> всередину <code>mcpServers</code>, не затираючи інші сервери.</p>
+        <pre>{
+  <span class="k">"mcpServers"</span>: {
+    <span class="k">"charles"</span>: {
+      <span class="k">"command"</span>: <span class="m">"uv"</span>,
+      <span class="k">"args"</span>: [<span class="m">"run"</span>, <span class="m">"--project"</span>, <span class="m">"/Users/you/Projects/charles-mcp"</span>, <span class="m">"charles-mcp"</span>],
+      <span class="k">"env"</span>: {
+        <span class="k">"CHARLES_USER"</span>: <span class="m">"ваш-логін"</span>,
+        <span class="k">"CHARLES_PASS"</span>: <span class="m">"ваш-пароль"</span>,
+        <span class="k">"CHARLES_MANAGE_LIFECYCLE"</span>: <span class="m">"false"</span>
+      },
+      <span class="k">"disabled"</span>: false,
+      <span class="k">"autoApprove"</span>: [<span class="m">"charles_status"</span>, <span class="m">"start_live_capture"</span>,
+                      <span class="m">"query_live_capture_entries"</span>, <span class="m">"group_capture_analysis"</span>]
+    }
+  }
+}</pre>
+        <p>Шлях у <code>--project</code> — абсолютний. <code>CHARLES_MANAGE_LIFECYCLE=false</code> тримає Charles під вашим контролем: сервер не закриє його сам.</p>
+      </li>
+      <li>
+        <h3>Перевірити зв'язок</h3>
+        <p>Зберегти файл — Kiro перепідключить сервер, у панелі MCP він має стати активним. Далі попросити агента викликати <code>charles_status</code>: у відповіді буде зв'язок із Charles і підказка наступного кроку.</p>
+      </li>
+      <li>
+        <h3>Завести маршрут під моки</h3>
+        <p>Один раз на домен. Правило Map Remote пишеться у конфіг Charles, а він перезаписує конфіг із пам'яті під час виходу — тому запис можливий лише при закритому Charles.</p>
+        <ul>
+          <li><code>mock_route_setup(host="*.example.com", path="/api/*")</code> без <code>apply</code> — агент віддасть кроки для UI, вони діють одразу після <b>Done</b>.</li>
+          <li>З <code>apply=true</code> — зберегти сесію, закрити Charles, дати агенту записати правило, запустити Charles.</li>
+          <li>Далі <code>mock_dispatcher(action="start")</code> — підніме диспетчер і ввімкне Map Remote.</li>
+        </ul>
+      </li>
+    </ol>
+
+    <div class="note">
+      <h3>Що не давати на автоапрув</h3>
+      <p><code>reset_environment</code> закриває Charles і видаляє збережені записи. <code>mock_setup_host</code> і <code>mock_route_setup</code> з <code>apply=true</code> пишуть конфіг Charles. <code>reverse_replay_entry</code> і правила в режимі <code>patch</code> відправляють справжні запити зі справжніми токенами. Ці виклики варто підтверджувати руками.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="note">
+      <h3>Два правила, які економлять час</h3>
+      <p>Charles читає конфіг під час запуску і перезаписує його з пам'яті під час виходу: правка конфіга при запущеному Charles просто зникне. Натомість моки і правила диспетчера — це дані на диску, вони перечитуються на кожен запит і перезапуску не потребують.</p>
+      <p>Кожен live-запит вивантажує всю сесію Charles. Перед сценарієм сесію варто очистити, інакше інструменти гальмують на гігабайтах трафіку.</p>
+    </div>
+  </section>
+
+  <footer>
+    <p>Деталі та контракт кожного інструмента — у репозиторії команди: <code>docs/agent-guide.uk.md</code>, <code>docs/charles-mapping.uk.md</code>, <code>docs/contracts/tools.uk.md</code>.</p>
+  </footer>
+
+</div>
+</body>
+</html>
