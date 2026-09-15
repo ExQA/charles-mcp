@@ -101,6 +101,10 @@ Tools that write the Charles config (`mock_setup_host`, `mock_route_setup` with 
 
 - To share a scenario, share the rule JSON with synthetic values in the fixture, not the mock directory.
 
+### Preserve the original response contract
+
+Some apps parse a response more strictly than a JSON library would, so a fixture should stay close to the captured one: build it from a real entry rather than from memory, change only the named fields, keep `Content-Type`, and compare the mocked entry with the original before trusting an HTTP 200. The agent-facing steps, including which formatting the tools keep and which they rewrite, are in [agent-guide.md](agent-guide.md), section 6.5.
+
 ## Environment variables
 
 | Variable | Purpose |

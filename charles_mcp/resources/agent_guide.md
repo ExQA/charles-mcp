@@ -148,7 +148,16 @@ Limits: status is always 200; the query string and HTTP method are ignored (all 
 
 Keys containing `/` or `~` are escaped as `~1` and `~0`. Intermediate objects are never created implicitly. Form bodies (`application/x-www-form-urlencoded`) are patched as flat objects: `{"op": "set", "path": "/lang", "value": "en"}`.
 
-### 6.5 Other QA recipes
+### 6.5 Keep the captured response contract
+
+Some apps parse a response more strictly than a JSON library would: a reordered object, a missing wrapper or a number that turned from `0.0` into `0` can produce a generic "server unavailable" screen even though the mock answered 200. Key order carries no meaning in JSON, yet a fixture should still stay as close to the captured response as the tools allow.
+
+1. **Start from the real entry**, not from memory: `get_traffic_entry_detail(..., include_full_body=true)`, raising `max_body_chars` until the body is complete. A truncated preview hides exactly the tail where the shape breaks.
+2. **Build the fixture from that entry** — `mock_rule_create_from_entry(mode="fixture")` or `mock_create_from_entry` — and change only the named fields with patches. Both tools keep key order, field names, array order and scalar types (`0` stays an int, `0.0` stays a float), but they re-serialize the JSON: indentation changes, a trailing newline is added, `1.50` becomes `1.5`, `\u0421` becomes the character itself, and duplicate keys collapse. When the app needs the original bytes, write them with `mock_rule_write(fixture_text=...)` or edit the generated `<rule_id>.body` file.
+3. **Keep the headers the app reads**, above all `Content-Type` with its charset; creating a rule from an entry copies the captured one. The dispatcher owns the transport headers and rewrites them on every response: `Content-Length`, `Content-Encoding` (bodies reach the app already decompressed), `Date`, `Server` and its own `X-Charles-MCP-Rule`. Those are not part of the application contract.
+4. **Verify against the real thing.** After the app repeats the request, compare the new entry with the original through `get_traffic_entry_detail(include_full_body=true)`: rule header, status, content type, top-level shape, array order and scalar types. HTTP 200 alone proves only that something answered.
+
+### 6.6 Other QA recipes
 
 - **Error screen**: fixture rule with `status=500` (or 401, 404) for that variant.
 - **Empty state**: `{"op": "set", "path": "/data/items", "value": []}`.
