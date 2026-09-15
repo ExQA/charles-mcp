@@ -103,15 +103,7 @@ Tools that write the Charles config (`mock_setup_host`, `mock_route_setup` with 
 
 ### Preserve the original response contract
 
-Some mobile clients or response adapters are more fragile than a standards-compliant JSON parser. Even though JSON object key order is semantically irrelevant, keep a fixture as close to the captured response as possible:
-
-1. Capture the real request and response, then inspect one confirmed entry with full request/response headers and body.
-2. Prefer `mock_rule_create_from_entry` in `mode="fixture"` or `mock_create_from_entry` and patch only the required JSON Pointer fields. Do not rebuild the entire response from memory.
-3. If using `mock_rule_write(fixture_json=...)`, preserve the original top-level and nested key order, array order, field names, nullability and scalar types. For exact bytes, write raw JSON text with `fixture_text` or edit the generated `.body` file; do not pretty-print a response that must match a captured contract byte-for-byte.
-4. Preserve application-relevant response headers, especially `Content-Type` including `charset=utf-8`. The dispatcher necessarily manages transport headers such as `Content-Length`, `Server` and `X-Charles-MCP-Rule`; those are not part of the application JSON contract.
-5. After the app repeats the request, query the new live entry and compare the original and mocked entries with `get_traffic_entry_detail`. Confirm the mock rule header, HTTP status, content type, top-level response shape, array order and scalar types (`0.0` versus `0`, string versus number). Do not trust a truncated preview or only the HTTP 200 status.
-
-If the app shows a generic "server unavailable" screen while the mock returns HTTP 200, first compare the actual response body and headers. Common causes are a reordered response shape, a missing wrapper such as `data`, a changed array order, a renamed field, a changed scalar type or a missing UTF-8 content type—not necessarily a routing failure.
+Some apps parse a response more strictly than a JSON library would, so a fixture should stay close to the captured one: build it from a real entry rather than from memory, change only the named fields, keep `Content-Type`, and compare the mocked entry with the original before trusting an HTTP 200. The agent-facing steps, including which formatting the tools keep and which they rewrite, are in [agent-guide.md](agent-guide.md), section 6.5.
 
 ## Environment variables
 
