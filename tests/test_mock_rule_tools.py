@@ -405,3 +405,64 @@ async def test_end_to_end_capture_rule_dispatcher(env) -> None:
     assert fake_client.tool_calls == ["map-remote:on", "map-remote:off"]
     assert "Map Remote enabled" in started["message"]
     assert "Map Remote disabled" in stopped["message"]
+
+
+def test_probe_target_builds_an_unresolvable_host_and_a_covered_path() -> None:
+    glob_route = RouteConfig(host="*.example.com", paths=["/api/*"])
+    exact_route = RouteConfig(host="api.example.com", paths=["/api/v1/wallet"])
+
+    # A glob becomes a name that cannot resolve, so an unmapped probe never
+    # reaches the real server; the path stays under the routed prefix.
+    assert rule_service_module.probe_target(glob_route, "/api/*") == (
+        "charles-mcp-probe.example.com",
+        "/api/__charles-mcp/health",
+    )
+    assert rule_service_module.probe_target(glob_route, "/*") == (
+        "charles-mcp-probe.example.com",
+        "/__charles-mcp/health",
+    )
+    # An exact-path route leaves no room for a probe path.
+    assert rule_service_module.probe_target(exact_route, "/api/v1/wallet") is None
+
+
+@pytest.mark.asyncio
+async def test_verify_reports_a_stopped_dispatcher_without_probing_charles(env) -> None:
+    server, _, config = env
+    RuleStore(config.mock_dir).save_route(RouteConfig(host="*.example.com", paths=["/api/*"]))
+
+    result = _tool_result(await server.call_tool("mock_dispatcher", {"action": "verify"}))
+
+    assert result.get("running") is not True
+    assert "does not answer" in result["message"]
+    # No dispatcher means no end-to-end probe through the user's real Charles.
+    assert "start the dispatcher first" in result["message"]
+    assert "example.com" not in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_verify_probes_every_route_once_the_dispatcher_answers(
+    env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server, _, config = env
+    store = RuleStore(config.mock_dir)
+    store.save_route(RouteConfig(host="*.example.com", paths=["/api/*"]))
+    store.save_route(RouteConfig(host="stage.example.com", paths=["/v2/*"]))
+
+    async def fake_direct(self, port: int):
+        return True, f"the dispatcher answers on {port}"
+
+    probed: list[str] = []
+
+    async def fake_through_charles(self, route, path_pattern: str) -> str:
+        probed.append(f"{route.host}{path_pattern}")
+        return f"{route.host}{path_pattern}: Charles routes it to the dispatcher"
+
+    monkeypatch.setattr(rule_service_module.RuleService, "_probe_dispatcher", fake_direct)
+    monkeypatch.setattr(
+        rule_service_module.RuleService, "_probe_through_charles", fake_through_charles
+    )
+
+    result = _tool_result(await server.call_tool("mock_dispatcher", {"action": "verify"}))
+
+    assert probed == ["*.example.com/api/*", "stage.example.com/v2/*"]
+    assert "Charles routes it to the dispatcher" in result["message"]

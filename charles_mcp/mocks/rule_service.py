@@ -8,10 +8,17 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import parse_qs
 
+import httpx
+
 from charles_mcp.analyzers.resource_classifier import classify_entry
 from charles_mcp.config import Config
 from charles_mcp.mocks.charles_config import apply_map_remote_route
-from charles_mcp.mocks.dispatcher import DispatcherSettings, DispatcherThread
+from charles_mcp.mocks.dispatcher import (
+    HEALTH_SUFFIX,
+    RULE_HEADER,
+    DispatcherSettings,
+    DispatcherThread,
+)
 from charles_mcp.mocks.json_patch import (
     JsonPatchError,
     apply_patches,
@@ -122,6 +129,22 @@ def merge_patches(
             continue
         kept.append(patch)
     return kept + list(new), aliased
+
+
+def probe_target(route: RouteConfig, path_pattern: str) -> tuple[str, str] | None:
+    """Build a probe host and path for a route, or None when it cannot be probed.
+
+    A host glob becomes a name that cannot resolve (`*.example.com` ->
+    `charles-mcp-probe.example.com`), so an unmapped probe fails in Charles
+    instead of reaching the real server. A route pinned to one exact path has no
+    room for the probe path and is skipped.
+    """
+    host = route.host.replace("*", "charles-mcp-probe", 1) if "*" in route.host else route.host
+    if path_pattern == "/*":
+        return host, HEALTH_SUFFIX
+    if path_pattern.endswith("/*"):
+        return host, path_pattern[:-2] + HEALTH_SUFFIX
+    return None
 
 
 def _route_labels(routes: list[RouteConfig]) -> list[str]:
@@ -654,9 +677,57 @@ class RuleService:
         state = "enabled" if enabled else "disabled"
         return f"; Map Remote {state} in Charles" if ok else f"; Charles refused to set Map Remote {state}"
 
+    async def _probe_dispatcher(self, port: int) -> tuple[bool, str]:
+        """Ask the dispatcher itself, without Charles in the path."""
+        url = f"http://{_LOOPBACK}:{port}{HEALTH_SUFFIX}"
+        try:
+            async with httpx.AsyncClient(trust_env=False, timeout=5.0) as client:
+                response = await client.get(url)
+        except httpx.HTTPError as exc:
+            return False, f"the dispatcher does not answer on {port}: {type(exc).__name__}"
+        if response.json().get("dispatcher") == "charles-mcp":
+            return True, f"the dispatcher answers on {port}"
+        return False, f"something else answers on {port}"
+
+    async def _probe_through_charles(self, route: RouteConfig, path_pattern: str) -> str:
+        """Send one probe through the Charles proxy: does Charles route it here?"""
+        target = probe_target(route, path_pattern)
+        if target is None:
+            return (
+                f"{route.host}{path_pattern}: skipped, an exact-path route leaves no room for a "
+                "probe path; verify it with real app traffic instead"
+            )
+        host, path = target
+        url = f"https://{host}{path}"
+        try:
+            # verify=False on purpose: Charles re-signs the probe with its own CA,
+            # and the answer is checked by its marker, not by the certificate.
+            async with httpx.AsyncClient(
+                proxy=self.config.proxy_url, verify=False, trust_env=False, timeout=8.0
+            ) as client:
+                response = await client.get(url)
+        except httpx.HTTPError as exc:
+            return (
+                f"{route.host}{path_pattern}: Charles did not route the probe "
+                f"({type(exc).__name__}). Map Remote is off, or the mapping is not loaded because "
+                "Charles was not started after the config was written, or SSL Proxying does not "
+                "cover the host"
+            )
+        if response.headers.get(RULE_HEADER) == "health":
+            return f"{route.host}{path_pattern}: Charles routes it to the dispatcher"
+        if response.status_code == 503:
+            return (
+                f"{route.host}{path_pattern}: Charles answered 503, so it tried the real host "
+                "instead of the dispatcher; the mapping is not active"
+            )
+        return (
+            f"{route.host}{path_pattern}: answered by something else (HTTP "
+            f"{response.status_code}), so the mapping does not cover this path"
+        )
+
     async def dispatcher(
         self,
-        action: Literal["start", "stop", "status"],
+        action: Literal["start", "stop", "status", "verify"],
         port: int | None = None,
         toggle_map_remote: bool = True,
     ) -> DispatcherStatusResult:
@@ -702,7 +773,20 @@ class RuleService:
                 message = "this MCP server is not running a dispatcher"
         own = self._dispatcher is not None and self._dispatcher.running
         running = own or _port_open(_LOOPBACK, port)
-        if action == "status":
+        if action == "verify":
+            reachable, message = await self._probe_dispatcher(port)
+            checks = [message]
+            if reachable:
+                for route in self.store.list_routes():
+                    for pattern in route.paths:
+                        checks.append(await self._probe_through_charles(route, pattern))
+            else:
+                checks.append(
+                    "skipped the end-to-end probe: start the dispatcher first "
+                    "(mock_dispatcher action=start)"
+                )
+            message = ". ".join(checks)
+        elif action == "status":
             message = (
                 "running inside this MCP server" if own
                 else "a dispatcher answers on this port" if running
