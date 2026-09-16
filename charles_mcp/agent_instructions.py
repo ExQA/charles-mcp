@@ -20,7 +20,15 @@ Hard rules:
    do not aim them at production without consent.
 5. Output is raw traffic (tokens, personal and payment data): never copy captured
    values into code, tests or shared files; do not repeat secrets back.
-6. Clean up: disable or remove the mocks you added and stop the dispatcher.
+6. Never restructure a mocked response. Keep the captured shape: key order, nesting,
+   wrappers, field names, array order and scalar types (0 is not 0.0, "1" is not 1).
+   Build the mock from a captured entry and change only the fields the user named;
+   never retype a response from memory or reorder it to look tidier. Apps parse more
+   strictly than JSON requires, and a reshaped body fails while still answering 200.
+7. Charles loads Map Remote mappings only when it starts. After apply=true the user
+   must start Charles, or the mapping is inert however right the config file looks.
+   Prove the path with mock_dispatcher(action="verify") before blaming a rule.
+8. Clean up: disable or remove the mocks you added and stop the dispatcher.
 
 Start: charles_status, then start_live_capture() — the capture always includes
 the traffic already recorded in Charles. Overview: group_capture_analysis or
@@ -28,7 +36,8 @@ mock_discover_variants. Detail: get_traffic_entry_detail for one entry_id.
 Mocking: Map Local (mock_*) for one URL = one response; dispatcher rules
 (mock_route_setup once per domain, mock_rule_create_from_entry, mock_dispatcher)
 for many paths, an `action` field in the body, any status or request edits.
-Verify with the X-Charles-Map-Local / X-Charles-MCP-Rule response headers.
+Verify with the X-Charles-Map-Local / X-Charles-MCP-Rule response headers, and
+mock_dispatcher(action="verify") when routed traffic never reaches the dispatcher.
 """
 
 

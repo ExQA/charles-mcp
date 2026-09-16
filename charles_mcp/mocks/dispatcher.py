@@ -63,6 +63,8 @@ _HOP_BY_HOP = {
 _DROP_REQUEST_HEADERS = _HOP_BY_HOP | {"host", "content-length"}
 # httpx returns decoded content, so the upstream encoding/length no longer apply.
 _DROP_RESPONSE_HEADERS = _HOP_BY_HOP | {"content-length", "content-encoding"}
+# Answered by the dispatcher itself, never forwarded: proves a request reached it.
+HEALTH_SUFFIX = "/__charles-mcp/health"
 _MAX_LINE = 65536
 
 
@@ -160,12 +162,18 @@ class _DispatcherHandler(BaseHTTPRequestHandler):
             return
         assert body is not None
 
+        split = urlsplit(self.path)
+        if is_health_path(split.path):
+            # Answered here so the probe proves Charles routed the request to the
+            # dispatcher, even for a host that has no route yet.
+            self._send_health(split.path)
+            return
+
         try:
             host = normalize_host(self.headers.get("Host", "").rsplit(":", 1)[0])
         except MockPathError:
             self._send_error_json(421, "Host header is missing or invalid")
             return
-        split = urlsplit(self.path)
         route = self.server.store.find_route(host, split.path)
         if route is None:
             self._send_error_json(
@@ -191,6 +199,18 @@ class _DispatcherHandler(BaseHTTPRequestHandler):
             self._serve_fixture(host, rule)
         else:
             self._forward(route, host, request, rule)
+
+    def _send_health(self, path: str) -> None:
+        routes = self.server.store.list_routes()
+        payload = {
+            "dispatcher": "charles-mcp",
+            "probe_path": path,
+            "mock_dir": str(self.server.store.root),
+            "routes": [f"{route.host}{pattern}" for route in routes for pattern in route.paths],
+        }
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = [("Content-Type", "application/json; charset=utf-8")]
+        self._send(200, headers, body, "health", [])
 
     def _serve_fixture(self, host: str, rule: MockRule) -> None:
         try:
@@ -358,6 +378,11 @@ class _DispatcherHandler(BaseHTTPRequestHandler):
             status,
             len(body),
         )
+
+
+def is_health_path(path: str) -> bool:
+    """A probe path: the health suffix, optionally under a route prefix."""
+    return path.rstrip("/").endswith(HEALTH_SUFFIX)
 
 
 def _override_headers(

@@ -18,7 +18,9 @@ Everything an agent needs to use this MCP server correctly: the operating model,
 5. **Never replay requests or forward patched requests to production without consent.** `reverse_replay_entry` and dispatcher patch rules send real requests, with real credentials, to real servers.
 6. **Never write captured values into source code, tests, commits or shared files,** and never suggest committing `~/charles-mocks`. Use synthetic data when a mock must be shared.
 7. **Do not repeat secrets back to the user** (tokens, passwords, full card numbers) unless they are needed for the task; refer to them by field name.
-8. **Leave the environment as you found it:** remove or disable the mocks you added when the scenario ends, stop the dispatcher you started, and say which Charles rules stay configured.
+8. **Never restructure a mocked response.** Keep the captured shape: key order, nesting, wrappers, field names, array order and scalar types (`0` is not `0.0`, `"1"` is not `1`). Build the mock from a captured entry and change only the fields the user named; never retype a response from memory. Apps parse more strictly than JSON requires, and a reshaped body fails while still answering 200 (section 6.5).
+9. **Remember that Charles loads Map Remote mappings only at startup.** After `apply=true` the user must start Charles; until then the mapping is inert however right the config file looks. When routed traffic never reaches the dispatcher, run `mock_dispatcher(action="verify")` before suspecting the rule.
+10. **Leave the environment as you found it:** remove or disable the mocks you added when the scenario ends, stop the dispatcher you started, and say which Charles rules stay configured.
 
 ## 3. First checks
 
@@ -98,6 +100,7 @@ Limits: status is always 200; the query string and HTTP method are ignored (all 
 | `mock_rule_list(host)`, `mock_rule_get(host, rule_id)` | Review; `errors` lists rule files the dispatcher ignores |
 | `mock_rule_set_enabled(host, rule_id, enabled)`, `mock_rule_remove(host, rule_id)` | Pause or archive a rule. `host` is the **rule's** host: `*` for general rules |
 | `mock_dispatcher(action="start" / "stop" / "status", port, toggle_map_remote=true)` | Start also turns Charles Map Remote on; stop turns it off. The dispatcher lives inside the MCP server and stops with it; for long runs the user can start `charles-mcp-dispatcher --port 18080` in a terminal instead |
+| `mock_dispatcher(action="verify")` | Proves the whole path without the app: it probes the dispatcher directly, then sends one probe per route through the Charles proxy and says for each whether Charles routed it. Use it whenever a rule seems not to fire — most often the answer is that Charles was never restarted after `apply=true` |
 
 ## 6. Main workflow: fake data from a real session
 

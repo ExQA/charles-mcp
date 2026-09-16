@@ -221,13 +221,19 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
 
     @mcp.tool()
     async def mock_dispatcher(
-        action: Literal["start", "stop", "status"] = "status",
+        action: Literal["start", "stop", "status", "verify"] = "status",
         port: int | None = None,
         toggle_map_remote: bool = True,
     ) -> DispatcherStatusResult:
-        """Start, stop or check the local dispatcher that Map Remote routes point to.
+        """Start, stop, check or verify the local dispatcher that Map Remote points to.
         A dispatcher started here lives inside the MCP server and stops with it; for a
         long-running one use the `charles-mcp-dispatcher` command. By default start also
         enables Charles Map Remote and stop disables it (toggle_map_remote), so routed
-        requests never point at a stopped dispatcher; mock files and rules stay."""
+        requests never point at a stopped dispatcher; mock files and rules stay.
+        action="verify" proves the whole path end to end: it asks the dispatcher directly,
+        then sends one harmless probe per route through the Charles proxy and reports
+        whether Charles actually routed it. Use it after writing a mapping with
+        apply=true and starting Charles, because Charles loads Map Remote mappings only
+        at startup — a mapping written while it ran, or written before the last start, is
+        not active even though the file on disk looks right."""
         return await service.dispatcher(action, port, toggle_map_remote)

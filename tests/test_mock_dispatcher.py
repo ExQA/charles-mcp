@@ -410,3 +410,29 @@ def test_request_patches_edit_form_bodies(env) -> None:
     assert response.getheader(RULE_HEADER) == "form-submit"
     assert response.getheader(WARNING_HEADER) is None
     assert parse_qs(upstream.bodies[-1].decode()) == {"action": ["submit"], "lang": ["en"]}
+
+
+def test_health_probe_is_answered_locally_and_never_forwarded(env) -> None:
+    _, upstream, port = env
+
+    for path in ("/__charles-mcp/health", "/api/wallet/__charles-mcp/health"):
+        connection = HTTPConnection("127.0.0.1", port, timeout=5)
+        connection.request("GET", path, headers={"Host": "localhost"})
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        connection.close()
+
+        assert response.status == 200
+        assert response.getheader("X-Charles-MCP-Rule") == "health"
+        assert payload["dispatcher"] == "charles-mcp"
+        assert payload["probe_path"] == path
+
+    # A probe for a host without any route still proves the dispatcher was reached.
+    connection = HTTPConnection("127.0.0.1", port, timeout=5)
+    connection.request("GET", "/__charles-mcp/health", headers={"Host": "elsewhere.example.com"})
+    response = connection.getresponse()
+    response.read()
+    connection.close()
+
+    assert response.status == 200
+    assert upstream.bodies == []  # nothing was forwarded upstream

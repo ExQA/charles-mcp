@@ -48,6 +48,8 @@ Two mechanisms; pick by endpoint:
 
 The Charles rule is set up **once per host or domain**. No restart is needed afterwards until a new domain appears.
 
+**The restart is what activates the mapping.** Charles reads its config only when it starts, so a Map Remote mapping written by `apply=true` does nothing until the user starts Charles — the file on disk and the Map Remote window can both look right while the mapping is inert. After the start, confirm it with `mock_dispatcher(action="verify")` instead of asking the user to re-test in the app.
+
 If a restart is unwelcome (an important session is running), add the rule by hand in the Charles UI: it works without a restart and applies as soon as you press **Done**.
 
 ## 4. How the restart goes
@@ -106,10 +108,13 @@ Limits of a whole-host route (`/*`): static files and WebSockets also go through
 
 ## 8. When a rule does not fire
 
+Start with `mock_dispatcher(action="verify")`: it probes the dispatcher directly and then one URL per route through Charles, so it separates "the rule is wrong" from "the request never reached the dispatcher" before you read the table.
+
 | Symptom | Cause and fix |
 |---|---|
 | Response has no `X-Charles-MCP-Rule` | Charles did not send the request to the dispatcher: Map Remote is off (`mock_dispatcher start` turns it on), the rule was not saved (it is missing in the Map Remote window — Cancel was pressed instead of Done), host, path or protocol do not match, no SSL Proxying for HTTPS |
 | Charles answers 503 "Name lookup failed" | Map Remote did not apply and Charles went to the original host; see the row above |
+| The mapping is in the Map Remote window but nothing is routed | Charles has not been started since the mapping was written: it loads mappings only at startup. Quit and start Charles, then `mock_dispatcher(action="verify")` |
 | `X-Charles-MCP-Rule: passthrough` | The request arrived but no rule matched: check path, method and the `action` value (`mock_discover_variants`) and whether the rule is disabled |
 | 421 from the dispatcher | Host or path is not covered by a route in `routes.json` — `mock_route_setup` |
 | 502 from the dispatcher | The dispatcher could not reach the server: network/VPN, timeout (`CHARLES_DISPATCHER_TIMEOUT`), certificate (`verify_tls`) |
