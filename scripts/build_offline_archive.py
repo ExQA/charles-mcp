@@ -27,6 +27,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -45,12 +46,22 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ARCHIVE_PREFIX = "charles-mcp"
 
 
-def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+def run(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     """Run a command, failing loudly with its own output."""
-    result = subprocess.run(command, capture_output=True, text=True, **kwargs)  # type: ignore[call-overload]
+    result = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
     if result.returncode != 0:
-        sys.exit(f"{' '.join(command[:3])}… failed:\n{result.stderr.strip() or result.stdout.strip()}")
+        sys.exit(
+            f"{' '.join(command[:3])}… failed:\n{result.stderr.strip() or result.stdout.strip()}"
+        )
     return result
+
+
+def zip_destination(value: str) -> Path:
+    """Validate --out while parsing, before minutes of downloads are spent."""
+    path = Path(value).expanduser()
+    if path.suffix != ".zip":
+        raise argparse.ArgumentTypeError(f"must end in .zip, got {path.name}")
+    return path
 
 
 def pip_python() -> str:
@@ -95,7 +106,12 @@ def export_requirements(target: Path) -> int:
         cwd=REPO_ROOT,
     ).stdout
     target.write_text(exported, encoding="utf-8")
-    return sum(1 for line in exported.splitlines() if "==" in line)
+    names = {
+        match.group(1).lower()
+        for match in (re.match(r"([A-Za-z0-9._-]+)==", line) for line in exported.splitlines())
+        if match
+    }
+    return len(names)
 
 
 def download_wheels(
@@ -143,7 +159,13 @@ def export_tree(staging: Path) -> Path:
             check=True,
         )
     with tarfile.open(tarball) as archive:
-        archive.extractall(staging, filter="data")
+        if hasattr(tarfile, "data_filter"):
+            archive.extractall(staging, filter="data")
+        else:
+            # Older 3.10/3.11 patch levels have no PEP 706 filters. The tarball
+            # is the output of our own `git archive`, so there is nothing to
+            # sanitise it against.
+            archive.extractall(staging)
     tarball.unlink()
     return staging / ARCHIVE_PREFIX
 
@@ -165,9 +187,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        type=Path,
+        type=zip_destination,
         default=REPO_ROOT / "dist" / f"charles-mcp-{date.today():%Y-%m-%d}.zip",
-        help="archive path (default dist/charles-mcp-<date>.zip)",
+        help="archive path, must end in .zip (default dist/charles-mcp-<date>.zip)",
     )
     args = parser.parse_args()
 
@@ -189,8 +211,6 @@ def main() -> None:
         download_wheels(requirements, tree / "wheels", python_versions, platforms)
 
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        if args.out.suffix != ".zip":
-            sys.exit(f"--out must end in .zip, got {args.out}")
         made = shutil.make_archive(str(args.out.with_suffix("")), "zip", root_dir=staging)
 
     size_mb = Path(made).stat().st_size / 1_048_576

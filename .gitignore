@@ -17,6 +17,10 @@ venv/
 # Build artifacts
 build/
 dist/
+
+# Built by scripts/build_offline_archive.py; never commit a wheelhouse
+wheels/
+requirements-lock.txt
 *.egg-info/
 
 # Local environment files

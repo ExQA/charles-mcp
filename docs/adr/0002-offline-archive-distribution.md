@@ -87,7 +87,7 @@ command still lands on upstream 3.0.3.
 | Complexity | Medium — a build script the maintainer runs |
 | Network at install | None |
 | Wrong-package risk | Removed by `--no-index` |
-| Size | ~13 MB per interpreter/platform set, pure-Python wheels shared |
+| Size | 13 MB for the first interpreter/platform set, ~4 MB for each additional one (pure-Python wheels are shared); 32 MB for the six sets built by default |
 
 **Pros:** installs with Python alone; exact pinned, hashed versions; works on a
 machine cut off from public registries.
@@ -109,7 +109,7 @@ vendored portably; the tree stops matching `uv.lock`; upgrades become hand work.
 ## Trade-off analysis
 
 The real trade is **archive size and maintainer effort against install-time
-network and the wrong-package failure**. 13 MB and one script run per release buy
+network and the wrong-package failure**. 32 MB and one script run per release buy
 an install that cannot reach a registry and therefore cannot pick up upstream
 3.0.3 — a failure whose symptom (missing tools) does not name its cause.
 
