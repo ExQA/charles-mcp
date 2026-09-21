@@ -24,6 +24,7 @@ from charles_mcp.mocks.json_patch import (
     apply_patches,
     get_pointer,
     pointers_may_alias,
+    type_change_warnings,
 )
 from charles_mcp.mocks.rules import (
     MockRule,
@@ -520,6 +521,7 @@ class RuleService:
             ("request", request_patches, request_document),
         ):
             if patches and document is not None:
+                warnings.extend(type_change_warnings(document, patches, label))
                 try:
                     apply_patches(document, patches)
                 except JsonPatchError as exc:
@@ -537,12 +539,11 @@ class RuleService:
         if mode == "fixture":
             if response_body.full_text is None or response_body.full_text_truncated:
                 raise ValueError(f"entry `{entry_id}` has no complete response body for a fixture")
-            if response_document is not None:
-                fixture = (
-                    json.dumps(response_document, ensure_ascii=False, indent=2) + "\n"
-                ).encode("utf-8")
-            else:
-                fixture = response_body.full_text.encode("utf-8")
+            # Verbatim, including whitespace and key order: the dispatcher
+            # applies this rule's patches when it serves the fixture, so there
+            # is nothing to re-serialise here. source_text is the body as the
+            # server wrote it; full_text is the normalised rendering.
+            fixture = (response_body.source_text or response_body.full_text).encode("utf-8")
             headers["Content-Type"] = (
                 entry.response.mime_type or response_body.mime_type or "application/json; charset=utf-8"
             )

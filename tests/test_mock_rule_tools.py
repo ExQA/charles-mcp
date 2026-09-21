@@ -466,3 +466,51 @@ async def test_verify_probes_every_route_once_the_dispatcher_answers(
 
     assert probed == ["*.example.com/api/*", "stage.example.com/v2/*"]
     assert "Charles routes it to the dispatcher" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_a_fixture_stores_the_captured_bytes_unchanged(env) -> None:
+    """A stored fixture must be the capture, not a tidied copy of it."""
+    server, fake_client, config = env
+    capture_id = await _capture(server, fake_client, [_entry("init", balance=120, second=1)])
+    entry_id = await _entry_id(server, capture_id, '"init"')
+
+    await server.call_tool(
+        "mock_rule_create_from_entry",
+        {
+            "source": "live",
+            "capture_id": capture_id,
+            "entry_id": entry_id,
+            "mode": "fixture",
+            "match_body_fields": ["/action"],
+            "rule_id": "verbatim",
+        },
+    )
+
+    captured = json.dumps({"status": "success", "data": {"balance": 120}})
+    stored = (Path(config.mock_dir) / "_rules" / "_any" / "verbatim.body").read_bytes()
+    assert stored.decode("utf-8") == captured
+    # Nothing reformatted: no indentation, no added trailing newline.
+    assert b"\n" not in stored
+
+
+@pytest.mark.asyncio
+async def test_a_patch_that_changes_a_number_type_warns(env) -> None:
+    server, fake_client, _config = env
+    capture_id = await _capture(server, fake_client, [_entry("init", balance=120, second=1)])
+    entry_id = await _entry_id(server, capture_id, '"init"')
+
+    created = _tool_result(
+        await server.call_tool(
+            "mock_rule_create_from_entry",
+            {
+                "source": "live",
+                "capture_id": capture_id,
+                "entry_id": entry_id,
+                "match_body_fields": ["/action"],
+                "response_patches": [{"op": "set", "path": "/data/balance", "value": 1000.5}],
+                "rule_id": "typed",
+            },
+        )
+    )
+    assert any("keep the type" in warning for warning in created["warnings"])

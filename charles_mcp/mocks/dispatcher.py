@@ -33,7 +33,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 
-from charles_mcp.mocks.json_patch import JsonPatchError, apply_patches
+from charles_mcp.mocks.json_patch import JsonPatchError, apply_patches, dump_like
 from charles_mcp.mocks.rules import (
     IncomingRequest,
     MockRule,
@@ -131,7 +131,7 @@ def _patch_json(
         return data, f"patch-failed: {exc}"
     if is_form:
         return urlencode(patched, doseq=True).encode("utf-8"), None
-    return json.dumps(patched, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), None
+    return dump_like(text, patched), None
 
 
 def _header_safe(value: str) -> str:
