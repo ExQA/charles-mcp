@@ -26,6 +26,9 @@ def test_package_main_runs_server_with_stdio(monkeypatch) -> None:
     monkeypatch.setattr(main_module, "setup_logging", lambda **kwargs: calls.append(("logging", kwargs)))
     monkeypatch.setattr(main_module, "setup_windows_stdio", lambda: calls.append(("stdio", None)))
     monkeypatch.setattr(main_module, "create_server", lambda: FakeServer())
+    # main() now rejects unknown arguments, and under pytest sys.argv holds the
+    # runner's own flags.
+    monkeypatch.setattr("sys.argv", ["charles-mcp"])
 
     main_module.main()
 
@@ -46,6 +49,9 @@ def test_package_main_respects_charles_log_dir(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(main_module, "setup_logging", lambda **kwargs: calls.append(("logging", kwargs)))
     monkeypatch.setattr(main_module, "setup_windows_stdio", lambda: calls.append(("stdio", None)))
     monkeypatch.setattr(main_module, "create_server", lambda: FakeServer())
+    # main() now rejects unknown arguments, and under pytest sys.argv holds the
+    # runner's own flags.
+    monkeypatch.setattr("sys.argv", ["charles-mcp"])
 
     main_module.main()
 

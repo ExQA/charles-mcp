@@ -29,10 +29,9 @@ def test_installer_never_reaches_a_registry() -> None:
     assert "--find-links wheels" in script
     assert "-r requirements-lock.txt" in script
 
-    for install in ("pip install", "pip install --quiet"):
-        for line in script.splitlines():
-            if install in line and "--no-index" not in line and "--upgrade pip" not in line:
-                raise AssertionError(f"install without --no-index: {line.strip()}")
+    for line in script.splitlines():
+        if "pip install" in line and "--no-index" not in line:
+            raise AssertionError(f"install without --no-index: {line.strip()}")
 
 
 def test_installer_installs_the_fork_itself_and_checks_it() -> None:
