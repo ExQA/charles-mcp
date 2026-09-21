@@ -150,7 +150,7 @@ def download_wheels(
             )
 
 
-def build_project_wheel(wheel_dir: Path) -> str:
+def build_project_wheel(source: Path, wheel_dir: Path) -> str:
     """Build this fork's own wheel, so the archive installs the package too.
 
     Without it the wheelhouse holds only dependencies and the server has to be
@@ -158,7 +158,10 @@ def build_project_wheel(wheel_dir: Path) -> str:
     ``charles-mcp`` command. The wheel is pure Python (``py3-none-any``), so one
     file serves every interpreter and architecture in the archive.
     """
-    run(["uv", "build", "--wheel", "--out-dir", str(wheel_dir)], cwd=REPO_ROOT)
+    # Built from the staged copy, not the working tree: the wheel then matches
+    # what the archive ships, and setuptools leaves its build/ and egg-info in
+    # the temporary directory instead of the repository.
+    run(["uv", "build", "--wheel", "--out-dir", str(wheel_dir), str(source)], cwd=REPO_ROOT)
     built = sorted(wheel_dir.glob("charles_mcp-*.whl"))
     if not built:
         sys.exit("uv build produced no wheel for charles-mcp")
@@ -227,7 +230,7 @@ def main() -> None:
 
         wheel_dir = tree / "wheels"
         download_wheels(requirements, wheel_dir, python_versions, platforms)
-        print(f"project wheel: {build_project_wheel(wheel_dir)}")
+        print(f"project wheel: {build_project_wheel(tree, wheel_dir)}")
 
         args.out.parent.mkdir(parents=True, exist_ok=True)
         made = shutil.make_archive(str(args.out.with_suffix("")), "zip", root_dir=staging)

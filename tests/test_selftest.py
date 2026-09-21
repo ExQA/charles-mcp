@@ -51,3 +51,19 @@ def test_selftest_flag_exits_before_the_server_starts(monkeypatch: pytest.Monkey
     with pytest.raises(SystemExit) as exit_info:
         entrypoint.main()
     assert exit_info.value.code == 0
+
+
+def test_unknown_arguments_fail_instead_of_starting_the_server(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.argv", ["charles-mcp", "--self-test"])
+
+    def _must_not_run() -> None:  # pragma: no cover - the assertion is that it never runs
+        raise AssertionError("a typo started the stdio server")
+
+    monkeypatch.setattr(entrypoint, "create_server", _must_not_run)
+
+    with pytest.raises(SystemExit) as exit_info:
+        entrypoint.main()
+    assert exit_info.value.code == 2
+    assert "unknown arguments: --self-test" in capsys.readouterr().err

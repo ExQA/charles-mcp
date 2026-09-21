@@ -55,8 +55,15 @@ def selftest() -> int:
 
 def main() -> None:
     """Start the Charles MCP server over stdio."""
-    if "--selftest" in sys.argv[1:]:
+    arguments = sys.argv[1:]
+    if arguments == ["--selftest"]:
         sys.exit(selftest())
+    if arguments:
+        # Without this a typo like --self-test starts the stdio server, which
+        # waits for a client and reads as a hang.
+        print(f"unknown arguments: {' '.join(arguments)}", file=sys.stderr)
+        print("usage: charles-mcp [--selftest]", file=sys.stderr)
+        sys.exit(2)
 
     log_dir = _resolve_log_dir()
     log_dir.mkdir(parents=True, exist_ok=True)

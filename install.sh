@@ -41,7 +41,6 @@ echo "creating the virtual environment in .venv"
 
 echo "installing the bundled dependencies (no network)"
 # requirements-lock.txt carries hashes, so pip verifies every file it installs.
-"$VENV_PYTHON" -m pip install --quiet --upgrade pip --no-index --find-links wheels 2>/dev/null || true
 "$VENV_PYTHON" -m pip install --quiet --no-index --find-links wheels -r requirements-lock.txt || fail \
     "pip could not install the dependencies. If it reported no matching distribution, this archive
   carries no wheels for Python $version — ask for an archive built for it."
