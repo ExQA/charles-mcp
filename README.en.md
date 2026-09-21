@@ -1,8 +1,9 @@
 # Charles MCP Server
 
-[![PyPI version](https://img.shields.io/pypi/v/charles-mcp.svg)](https://pypi.org/project/charles-mcp/)
-[![License](https://img.shields.io/pypi/l/charles-mcp.svg)](LICENSE)
-[![Python](https://img.shields.io/pypi/pyversions/charles-mcp.svg)](https://pypi.org/project/charles-mcp/)
+[![Version](https://img.shields.io/badge/version-3.1.0rc1-0e7c76.svg)](docs/team-installation.md)
+[![License](https://img.shields.io/badge/license-MIT-0e7c76.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-0e7c76.svg)](pyproject.toml)
+[![Install](https://img.shields.io/badge/install-from%20the%20archive%2C%20not%20PyPI-c75300.svg)](docs/team-installation.md)
 
 [Docs](docs/README.md) | [Team Installation](docs/team-installation.md) | [Agent guide](docs/agent-guide.md) | [Mapping & Charles restarts](docs/charles-mapping.md) | [ADR-0001](docs/adr/0001-data-driven-body-aware-mocks.md) | [Tool Contract](docs/contracts/tools.md) | [AGENTS](AGENTS.md) | [Agent Workflow Guide](docs/agent-workflows.md) | [Ukrainian README](README.md)
 

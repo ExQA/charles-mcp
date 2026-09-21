@@ -1,8 +1,9 @@
 # Charles MCP Server
 
-[![PyPI version](https://img.shields.io/pypi/v/charles-mcp.svg)](https://pypi.org/project/charles-mcp/)
-[![License](https://img.shields.io/pypi/l/charles-mcp.svg)](LICENSE)
-[![Python](https://img.shields.io/pypi/pyversions/charles-mcp.svg)](https://pypi.org/project/charles-mcp/)
+[![Версія](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D1%96%D1%8F-3.1.0rc1-0e7c76.svg)](docs/team-installation.uk.md)
+[![Ліцензія](https://img.shields.io/badge/%D0%BB%D1%96%D1%86%D0%B5%D0%BD%D0%B7%D1%96%D1%8F-MIT-0e7c76.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-0e7c76.svg)](pyproject.toml)
+[![Встановлення](https://img.shields.io/badge/%D0%B2%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%BD%D1%8F-%D0%B7%20%D0%B0%D1%80%D1%85%D1%96%D0%B2%D1%83%2C%20%D0%BD%D0%B5%20%D0%B7%20PyPI-c75300.svg)](docs/team-installation.uk.md)
 
 [Документація](docs/README.uk.md) | [Встановлення для команди](docs/team-installation.uk.md) | [Посібник для агентів](docs/agent-guide.uk.md) | [Мапінг і перезапуск Charles](docs/charles-mapping.uk.md) | [ADR-0001](docs/adr/0001-data-driven-body-aware-mocks.uk.md) | [Контракт інструментів](docs/contracts/tools.uk.md) | [AGENTS](AGENTS.uk.md) | [Сценарії для агента](docs/agent-workflows.uk.md) | [English README](README.en.md)
 
