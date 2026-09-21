@@ -40,6 +40,45 @@ uv run python -m pytest -q
 
 На macOS не кладіть проєкт у теки із синхронізацією iCloud, наприклад `~/Documents`: синхронізація заважає віртуальному оточенню.
 
+## Встановлення з офлайн-архіву
+
+Для машин, яким взагалі не можна ходити в PyPI, — або для людей без `uv` —
+мейнтейнер збирає архів, що несе залежності в собі:
+
+```bash
+uv run python scripts/build_offline_archive.py
+```
+
+Скрипт вивантажує з `uv.lock` закріплений набір рантайм-залежностей у
+`requirements-lock.txt`, качає їх як колеса в `wheels/` для кожної версії Python
+і платформи зі свого списку і пакує це разом із відстежуваним деревом `HEAD`.
+За замовчуванням — Python 3.12-3.14 для Apple Silicon та Intel macOS; для іншого
+передайте `--python-version` / `--platform` (обидва можна повторювати), а шлях
+архіву — через `--out`.
+
+Для встановлення потрібен лише Python — ні `uv`, ні мережі:
+
+```bash
+unzip charles-mcp-<дата>.zip -d ~/Projects
+cd ~/Projects/charles-mcp
+python3 -m venv .venv
+.venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+```
+
+Офлайн це робить саме `--no-index`: pip не звертається до жодного реєстру і
+ставить рівно ті закріплені версії з хешами, на яких форк перевірявся. У
+вітрині лежить кілька версій інтерпретатора одразу, pip сам бере сумісний файл;
+якщо він каже, що відповідного дистрибутива немає, — цю версію Python у цей
+архів не збирали.
+
+MCP-клієнт тоді запускає інтерпретатор оточення і обгортку з кореня
+репозиторію, а не `uv`:
+
+```json
+"command": "/Users/<ви>/Projects/charles-mcp/.venv/bin/python",
+"args": ["/Users/<ви>/Projects/charles-mcp/charles-mcp-server.py"]
+```
+
 ### Налаштування MCP-клієнта
 
 Вкажіть клієнту абсолютний шлях до репозиторію:
@@ -125,7 +164,8 @@ claude mcp add-json charles '{"type":"stdio","command":"uv","args":["run","--pro
 1. Підніміть `[project].version` у `pyproject.toml`.
 2. Запустіть `uv run ruff check charles_mcp tests`, `uv run mypy charles_mcp` і `uv run pytest -q`.
 3. Поставте тег на коміт і відправте його в командний репозиторій.
-4. Повідомте тег команді; кожен виконує `git fetch && git checkout <tag> && uv sync --locked --extra dev` і перезапускає MCP-клієнт.
+4. Для команд, що працюють з архівом, зберіть із цього тега офлайн-архів (`uv run python scripts/build_offline_archive.py`) і передайте його; колеса беруться з того самого локу, тому обидва шляхи встановлення дають однакові версії.
+5. Повідомте тег команді; кожен виконує `git fetch && git checkout <tag> && uv sync --locked --extra dev` і перезапускає MCP-клієнт.
 
 ## Правила безпеки
 

@@ -11,6 +11,7 @@ This page is the canonical documentation entrypoint for `charles-mcp`.
 - [Agent guide](./agent-guide.md): the guide the server hands to agents (MCP instructions + resource `charles-mcp://agent-guide`)
 - [Mapping & Charles restarts](./charles-mapping.md): how Map Local / Map Remote rules work, when Charles must be restarted, rollback, troubleshooting
 - [ADR-0001](./adr/0001-data-driven-body-aware-mocks.md): why body-aware mocks are data-driven rules served by a local dispatcher
+- [ADR-0002](./adr/0002-offline-archive-distribution.md): why the fork ships as an archive that carries its own wheels
 - [Team Installation](./team-installation.md): installing this fork on another computer, security rules, troubleshooting
 - [Agent Workflow Guide](./agent-workflows.md): task-oriented workflow playbooks
 - [Tool Contract](./contracts/tools.md): canonical public tool surface and per-tool contract
