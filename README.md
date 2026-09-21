@@ -45,36 +45,52 @@ Charles MCP Server підключає Charles Proxy до MCP-клієнтів. �
 
 ### 2. Встановіть і налаштуйте MCP-клієнт
 
-> **Цього форку немає в PyPI.** Пакет `charles-mcp` у PyPI — це upstream 3.0.3: у ньому немає інструментів моків, а без обмеження `mcp<2` він падає на старті з `ModuleNotFoundError: mcp.server.fastmcp`. Ставте форк із репозиторію за [docs/team-installation.uk.md](docs/team-installation.uk.md); приклади з `uvx` нижче стосуються релізів upstream.
+> **Ніколи не ставте цей форк із реєстру.** Пакет `charles-mcp` у PyPI — це upstream 3.0.3: у ньому немає інструментів моків, а без обмеження `mcp<2` він падає на старті з `ModuleNotFoundError: mcp.server.fastmcp`. Тобто `uvx charles-mcp` і `pip install charles-mcp` дають сервер без половини інструментів, причому збій ніяк не називає причини. Ставте з цього репозиторію або з офлайн-архіву — див. [docs/team-installation.uk.md](docs/team-installation.uk.md).
 
-Клонувати репозиторій і створювати virtualenv вручну не потрібно. Потрібен [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Оберіть один зі шляхів встановлення; усе нижче посилається на `<PATH>` — абсолютний шлях до чекауту або до розпакованого архіву.
+
+**Шлях A — через [uv](https://docs.astral.sh/uv/getting-started/installation/):**
+
+```bash
+cd <PATH> && uv sync --locked
+```
+
+**Шлях B — офлайн, з архіву, що несе `wheels/`:** потрібен лише Python.
+
+```bash
+cd <PATH>
+python3 -m venv .venv
+.venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+```
+
+У `CHARLES_USER` / `CHARLES_PASS` нижче підставте свої дані від Charles Web Interface; наведені значення — заглушки.
 
 #### Claude Code CLI
 
 ```bash
 claude mcp add-json charles '{
   "type": "stdio",
-  "command": "uvx",
-  "args": ["charles-mcp"],
+  "command": "uv",
+  "args": ["run", "--project", "<PATH>", "charles-mcp"],
   "env": {
-    "CHARLES_USER": "admin",
-    "CHARLES_PASS": "123456",
+    "CHARLES_USER": "ваш-логін",
+    "CHARLES_PASS": "ваш-пароль",
     "CHARLES_MANAGE_LIFECYCLE": "false"
   }
 }'
 ```
 
-#### Claude Desktop / Cursor / загальний JSON-конфіг
+#### Claude Desktop / Cursor / Kiro / загальний JSON-конфіг
 
 ```json
 {
   "mcpServers": {
     "charles": {
-      "command": "uvx",
-      "args": ["charles-mcp"],
+      "command": "uv",
+      "args": ["run", "--project", "<PATH>", "charles-mcp"],
       "env": {
-        "CHARLES_USER": "admin",
-        "CHARLES_PASS": "123456",
+        "CHARLES_USER": "ваш-логін",
+        "CHARLES_PASS": "ваш-пароль",
         "CHARLES_MANAGE_LIFECYCLE": "false"
       }
     }
@@ -82,99 +98,109 @@ claude mcp add-json charles '{
 }
 ```
 
+На шляху B замініть ці два рядки на інтерпретатор самого віртуального оточення:
+
+```json
+"command": "<PATH>/.venv/bin/python",
+"args": ["<PATH>/charles-mcp-server.py"]
+```
+
+Kiro читає `.kiro/settings/mcp.json` у проєкті (він виграє) або `~/.kiro/settings/mcp.json` і додатково приймає `"disabled": false` та `"autoApprove": [...]`.
+
 #### Codex CLI
 
 ```toml
 [mcp_servers.charles]
-command = "uvx"
-args = ["charles-mcp"]
+command = "uv"
+args = ["run", "--project", "<PATH>", "charles-mcp"]
 
 [mcp_servers.charles.env]
-CHARLES_USER = "admin"
-CHARLES_PASS = "123456"
+CHARLES_USER = "ваш-логін"
+CHARLES_PASS = "ваш-пароль"
 CHARLES_MANAGE_LIFECYCLE = "false"
 ```
 
 ### Автовстановлення через AI-агента
 
-Скопіюйте промпт нижче в будь-якого AI-агента (Claude Code, ChatGPT, Gemini CLI, Cursor Agent тощо), і він сам встановить і налаштує charles-mcp. Промпт лишено англійською: агенти виконують його однаково будь-якою мовою спілкування.
-
-[![Автовстановлення](https://img.shields.io/badge/%D0%90%D0%B2%D1%82%D0%BE%D0%B2%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%BD%D1%8F-%D1%80%D0%B5%D0%BA%D0%BE%D0%BC%D0%B5%D0%BD%D0%B4%D0%BE%D0%B2%D0%B0%D0%BD%D0%BE-e53935?style=for-the-badge)](#автовстановлення-через-ai-агента)
+Дайте агенту (Claude Code, Cursor Agent, Kiro, Gemini CLI, ChatGPT з інструментами) промпт нижче, замінивши `<PATH>` на абсолютний шлях до чекауту чи розпакованого архіву. Промпт лишено англійською: агенти виконують його однаково будь-якою мовою спілкування.
 
 <details>
-<summary><strong>🔴 Натисніть, щоб розкрити промпт автовстановлення (рекомендовано)</strong></summary>
+<summary><strong>Натисніть, щоб розкрити промпт автовстановлення</strong></summary>
 
 ```text
-Install the "charles-mcp" MCP server and configure it for my MCP client. Follow these steps exactly:
+Install the charles-mcp MCP server from the local directory <PATH> and configure
+my MCP client to use it. Follow these steps exactly.
 
-Step 1 — Detect OS:
-  Determine if this machine runs Windows, macOS, or Linux.
+CRITICAL RULE: never run `pip install charles-mcp`, `uvx charles-mcp` or
+`uv tool install charles-mcp`. The name charles-mcp on PyPI is a different,
+older package without the mocking tools, and it fails to start. Everything must
+come from the directory above and from the wheels/ folder inside it.
 
-Step 2 — Ensure uv is installed:
-  Run: uv --version
-  If the command fails (uv not found):
-    - macOS/Linux: run: curl -LsSf https://astral.sh/uv/install.sh | sh
-    - Windows: run: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-  After installing, verify uv works: uv --version
+Step 1 - Check the directory:
+  Confirm <PATH> exists and contains pyproject.toml, charles_mcp/ and
+  charles-mcp-server.py. If it does not, stop and tell me.
+  Note whether it also contains wheels/ and requirements-lock.txt.
 
-Step 3 — Detect which MCP client is installed:
-  Check in this order and use the FIRST match:
+Step 2 - Build the environment, preferring the offline path:
+  a) If wheels/ and requirements-lock.txt exist, use them (no network):
+       cd <PATH>
+       python3 -m venv .venv
+       .venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+     On Windows the interpreter is .venv\Scripts\python.exe.
+     If pip reports no matching distribution, the wheels were built for other
+     Python versions - report the Python version you used and stop.
+  b) Otherwise, if `uv --version` works:
+       cd <PATH> && uv sync --locked
+  c) Otherwise tell me which of the two is missing instead of improvising.
 
-  a) Claude Code — run: claude --version
-     If it succeeds, run this command and skip to Step 5:
-       claude mcp add-json charles '{"type":"stdio","command":"uvx","args":["charles-mcp"],"env":{"CHARLES_USER":"admin","CHARLES_PASS":"123456","CHARLES_MANAGE_LIFECYCLE":"false"}}'
+Step 3 - Verify the server starts:
+  Run it for about 3 seconds, then terminate it:
+    <PATH>/.venv/bin/python <PATH>/charles-mcp-server.py
+  (or `uv run --project <PATH> charles-mcp` if you took path 2b).
+  It must start with no import errors. A line about default credentials is
+  expected and fine.
 
-  b) Claude Desktop — check if config file exists:
-     - macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json
-     - Windows: %APPDATA%\Claude\claude_desktop_config.json
-     - Linux:   ~/.config/Claude/claude_desktop_config.json
+Step 4 - Detect my MCP client, first match wins:
+  a) Kiro - .kiro/settings/mcp.json in the current project, else ~/.kiro/settings/mcp.json
+  b) Claude Code - `claude --version` succeeds
+  c) Cursor - ~/.cursor/mcp.json or .cursor/mcp.json
+  d) Claude Desktop - ~/Library/Application Support/Claude/claude_desktop_config.json
+     (Windows: %APPDATA%\Claude\claude_desktop_config.json,
+      Linux: ~/.config/Claude/claude_desktop_config.json)
+  e) Windsurf - ~/.codeium/windsurf/mcp_config.json
+  If none is found, ask me.
 
-  c) Cursor — check if any of these exist:
-     - ~/.cursor/mcp.json
-     - .cursor/mcp.json (in current project)
+Step 5 - Ask me for my Charles Web Interface login and password before writing
+  them anywhere. Do not invent values and do not reuse the examples from the
+  documentation.
 
-  d) Windsurf — check if exists:
-     - ~/.codeium/windsurf/mcp_config.json
-
-  e) Kiro — check if either of these exists:
-     - .kiro/settings/mcp.json (in current project, wins over the user one)
-     - ~/.kiro/settings/mcp.json
-
-  If none detected, ask the user which client they use.
-
-Step 4 — Write config (for clients b/c/d/e):
-  The config entry to add is:
+Step 6 - Write the config entry, using ABSOLUTE paths:
     "charles": {
-      "command": "uvx",
-      "args": ["charles-mcp"],
+      "command": "<PATH>/.venv/bin/python",
+      "args": ["<PATH>/charles-mcp-server.py"],
       "env": {
-        "CHARLES_USER": "admin",
-        "CHARLES_PASS": "123456",
+        "CHARLES_USER": "<the login I gave you>",
+        "CHARLES_PASS": "<the password I gave you>",
         "CHARLES_MANAGE_LIFECYCLE": "false"
       }
     }
+  If you used uv (path 2b) instead:
+      "command": "uv",
+      "args": ["run", "--project", "<PATH>", "charles-mcp"]
 
-  IMPORTANT: If the config file already exists, read it first, parse the JSON,
-  add the "charles" key inside "mcpServers" (create "mcpServers" if absent),
-  and write back. Do NOT overwrite other existing MCP server entries.
-  If the file does not exist, create it with:
-    { "mcpServers": { "charles": { ... } } }
+  Read any existing config file first, parse the JSON, add "charles" inside
+  "mcpServers" (create "mcpServers" if absent) and write it back. Do not drop or
+  overwrite other servers. Kiro also accepts "disabled": false and "autoApprove";
+  if you set autoApprove, list only read-only tools: charles_status,
+  start_live_capture, query_live_capture_entries, group_capture_analysis. Never
+  auto-approve reset_environment, mock_setup_host, mock_route_setup or
+  reverse_replay_entry - they close Charles, write its config, or send real
+  requests to real servers.
 
-  Kiro takes the same entry and additionally accepts "disabled": false and
-  "autoApprove": [...]. If you set autoApprove, list only read-only tools such as
-  charles_status, start_live_capture, query_live_capture_entries and
-  group_capture_analysis. Never auto-approve reset_environment, mock_setup_host or
-  mock_route_setup: they close Charles or write its config.
-
-Step 5 — Verify:
-  Run: uvx charles-mcp
-  Wait 3 seconds then terminate the process.
-  If it starts without import errors, the installation is successful.
-
-Step 6 — Report:
-  Print: "charles-mcp installed successfully. Please restart your MCP client to load the new server."
-  For Kiro, saving mcp.json reconnects the server; check it in the MCP panel.
-  Also mention that Charles Proxy must be running with Web Interface enabled (Proxy → Web Interface Settings, username: admin, password: 123456).
+Step 7 - Report which client you configured and which config file you edited,
+  and tell me to restart that client. For Kiro, saving mcp.json reconnects the
+  server - it should appear in the MCP panel. Remind me that Charles must be
+  running with its Web Interface enabled (Proxy -> Web Interface Settings).
 ```
 
 </details>
