@@ -185,6 +185,11 @@ class RuleRequest(BaseModel):
         return value
 
 
+# Headers about the transfer itself: the dispatcher owns these, a rule cannot
+# make them true by declaring them.
+_REFUSED_RESPONSE_HEADERS = {"content-encoding", "content-length", "transfer-encoding"}
+
+
 class RuleResponse(BaseModel):
     """``fixture`` serves the stored body; ``patch`` edits the real upstream response."""
 
@@ -199,6 +204,26 @@ class RuleResponse(BaseModel):
     @classmethod
     def _check_patches(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
         validate_patches(value)
+        return value
+
+    @field_validator("headers")
+    @classmethod
+    def _check_headers(cls, value: dict[str, str]) -> dict[str, str]:
+        """Refuse headers that describe the transfer rather than the content.
+
+        The dispatcher sends the stored body as it is, so a rule that declares
+        `Content-Encoding: gzip` over plain bytes produces a response the app
+        cannot decode — and the failure surfaces as a parse error far from the
+        rule. Length and transfer encoding are computed when the response is
+        sent, so a stored value could only disagree with reality.
+        """
+        refused = sorted(name for name in value if name.lower() in _REFUSED_RESPONSE_HEADERS)
+        if refused:
+            raise ValueError(
+                f"response headers {refused} are set by the dispatcher, not by the rule: "
+                "the body is served exactly as stored, so declaring an encoding or a length "
+                "here would describe something the response is not"
+            )
         return value
 
 

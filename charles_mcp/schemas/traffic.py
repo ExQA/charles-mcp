@@ -50,6 +50,10 @@ class BodyContent(BaseModel):
     preview_truncated: bool = False
     full_text: str | None = None
     full_text_truncated: bool = False
+    # JSON bodies are re-rendered minified into full_text so that analysis,
+    # grouping and previews are stable. A mock has to answer with what the
+    # server actually sent, so the decoded original is kept here as well.
+    source_text: str | None = Field(default=None, exclude=True)
     parsed_json: dict[str, Any] | list[Any] | None = Field(default=None, exclude=True)
     parsed_form: dict[str, list[str]] | None = Field(default=None, exclude=True)
     multipart_summary: list[dict[str, Any]] = Field(default_factory=list)

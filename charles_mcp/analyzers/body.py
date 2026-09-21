@@ -108,6 +108,11 @@ def normalize_body(
                     rendered,
                     max_chars=max_full_body_chars,
                 )
+                # full_text is normalised so analysis and grouping are stable;
+                # a mock must answer with what the server sent, so the decoded
+                # original is kept too (dropped when it did not fit whole).
+                source, source_truncated = _clip_text(text, max_chars=max_full_body_chars)
+                result.source_text = None if source_truncated else source
             return result
         except Exception:
             result.decode_warnings.append("json_parse_failed")

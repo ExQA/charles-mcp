@@ -87,6 +87,77 @@ def get_pointer(document: Any, pointer: str) -> Any:
     return current
 
 
+def type_change_warnings(document: Any, patches: list[dict[str, Any]], label: str) -> list[str]:
+    """Warn when a patch changes the JSON type of a value it replaces.
+
+    A balance captured as ``0.0`` and mocked as ``1000`` is a different type on
+    the wire — ``1000`` instead of ``1000.0`` — and a strict client can reject
+    it while the response still looks right to a human. Booleans are excluded
+    because in Python they *are* integers.
+    """
+    warnings: list[str] = []
+    for patch in patches:
+        if patch.get("op") != "set":
+            continue
+        pointer = str(patch.get("path", ""))
+        try:
+            current = get_pointer(document, pointer)
+        except (KeyError, JsonPatchError):
+            # A pointer that does not fit the capture is reported by
+            # apply_patches with a far better message than a type warning.
+            continue
+        new = patch.get("value")
+        if current is None or new is None:
+            continue
+        if isinstance(current, bool) or isinstance(new, bool):
+            continue
+        if isinstance(current, float) and isinstance(new, int):
+            warnings.append(
+                f"{label} patch `{pointer}` replaces {current!r} with {new!r}: the capture holds a "
+                f"number with a decimal point, so use {float(new)!r} to keep the type"
+            )
+        elif isinstance(current, int) and isinstance(new, float):
+            warnings.append(
+                f"{label} patch `{pointer}` replaces {current!r} with {new!r}: the capture holds a "
+                f"whole number, so use {int(new)!r} to keep the type"
+            )
+        elif isinstance(current, str) != isinstance(new, str):
+            warnings.append(
+                f"{label} patch `{pointer}` replaces {current!r} with {new!r}: that changes a "
+                "string into a number or back, which strict clients reject"
+            )
+    return warnings
+
+
+def dump_like(original: str, document: Any) -> bytes:
+    """Serialise ``document`` in the shape ``original`` was written in.
+
+    Apps parse more strictly than JSON requires, and a body that arrives
+    reshaped is a mock that fails while still answering 200. Whitespace rarely
+    breaks a parser on its own, but a reformatted body also hides real
+    differences when someone compares the mock with the capture, so the stored
+    and served bodies keep the captured layout: minified stays minified,
+    indented keeps its indent, and a trailing newline is kept or left off.
+    """
+    stripped = original.strip()
+    if "\n" in stripped:
+        indent: int | str = 2
+        for line in stripped.splitlines()[1:]:
+            leading = len(line) - len(line.lstrip(" "))
+            if leading:
+                indent = leading
+                break
+            if line.startswith("\t"):
+                indent = "\t"
+                break
+        text = json.dumps(document, ensure_ascii=False, indent=indent)
+    else:
+        text = json.dumps(document, ensure_ascii=False, separators=(",", ":"))
+    if original.endswith("\n"):
+        text += "\n"
+    return text.encode("utf-8")
+
+
 def validate_patches(patches: list[dict[str, Any]]) -> None:
     """Check patch structure without a target document."""
     for index, patch in enumerate(patches):
