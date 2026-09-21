@@ -116,17 +116,6 @@
   .d-head { fill: var(--line-strong); }
 
   .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-  .cases { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; }
-  .case {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
-    padding: 18px 20px; display: flex; flex-direction: column; gap: 10px;
-  }
-  .case p { font-size: 14.5px; color: var(--muted); }
-  .case .ask {
-    font-family: var(--mono); font-size: 12.5px; line-height: 1.55; color: var(--ink);
-    border-top: 1px solid var(--line); padding-top: 10px; margin-top: auto;
-  }
-  .case .ask b { color: var(--muted); font-weight: 400; display: block; margin-bottom: 4px; }
   .note {
     border-left: 3px solid var(--mock); background: var(--surface); border-radius: 0 8px 8px 0;
     padding: 16px 18px; display: flex; flex-direction: column; gap: 8px;
@@ -174,56 +163,6 @@
       <span>Застосунок</span><b>→</b><span>Charles :8888</span><b>→</b><span>диспетчер :18080</span><b>→</b><span>сервер</span>
     </div>
   </header>
-
-  <section>
-    <div class="section-head">
-      <h2>Навіщо це команді</h2>
-      <p class="prose">Коротко: Charles бачить увесь трафік телефона, а MCP дає агенту читати цей трафік і підміняти відповіді. Усе відбувається на вашій машині — у застосунку нічого не перезбирають, на бекенді нічого не чіпають, іншим тестувальникам це не заважає.</p>
-    </div>
-
-    <div class="cases">
-      <div class="case">
-        <h3>Побачити, що насправді шле застосунок</h3>
-        <p>Не треба просити логи чи смикати розробника. Агент читає сесію Charles і відповідає словами: які запити пішли, де помилка, що довго відповідає.</p>
-        <p class="ask"><b>Кажете агенту</b>покажи запити до api за останню хвилину, де код не 200</p>
-      </div>
-
-      <div class="case">
-        <h3>Отримати стан, якого не дістати даними</h3>
-        <p>Великий баланс, порожній список, прострочена картка. Відповідь лишається справжньою — міняється одне назване поле.</p>
-        <p class="ask"><b>Кажете агенту</b>на цей запит зроби баланс 1000 для USD</p>
-      </div>
-
-      <div class="case">
-        <h3>Перевірити, як застосунок тримає помилки</h3>
-        <p>500, 401, порожнє тіло. Раніше під це просили бекенд «поламати» ендпоінт або чекали, доки помилка трапиться сама.</p>
-        <p class="ask"><b>Кажете агенту</b>віддай на цей виклик 500, решта хай ідуть як є</p>
-      </div>
-
-      <div class="case">
-        <h3>Подивитися лоадери і таймаути</h3>
-        <p>Відповідь можна затримати, не псуючи мережу цілком. Видно спінери, повторні запити й те, що застосунок робить, поки чекає.</p>
-        <p class="ask"><b>Кажете агенту</b>додай цій відповіді 5 секунд затримки</p>
-      </div>
-
-      <div class="case">
-        <h3>Почати тестувати до бекенду</h3>
-        <p>Ендпоінта ще нема, а схема вже домовлена. Агент віддає готову відповідь замість сервера — екран можна перевірити вже зараз.</p>
-        <p class="ask"><b>Кажете агенту</b>поки ендпоінта нема, відповідай ось цим JSON</p>
-      </div>
-
-      <div class="case">
-        <h3>Зібрати баг для розробника</h3>
-        <p>Замість «не працює» — конкретний запит і відповідь: URL, код, тіло. Токени й особисті дані в тікет не тягнемо.</p>
-        <p class="ask"><b>Кажете агенту</b>покажи цей запит і відповідь повністю, без токенів</p>
-      </div>
-    </div>
-
-    <div class="note">
-      <h3>Межі</h3>
-      <p>Підміна діє лише там, де проксі — на вашому комп'ютері й телефоні. Інші люди й стенди бачать справжні відповіді. Моки живуть файлами поза репозиторієм, тому їх не комітять: у них реальні дані з трафіку.</p>
-    </div>
-  </section>
 
   <section>
     <div class="section-head">
