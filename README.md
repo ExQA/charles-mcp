@@ -59,10 +59,12 @@ cd <PATH> && uv sync --locked
 **Шлях B — офлайн, з архіву, що несе `wheels/`:** потрібен лише Python.
 
 ```bash
-cd <PATH>
-python3 -m venv .venv
-.venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+cd <PATH> && ./install.sh
 ```
+
+Скрипт створює `.venv`, ставить принесені колеса разом із самим форком,
+перевіряє збірку і друкує запис для клієнта. Хочете доручити це агенту —
+дайте йому промпт із [INSTALL-PROMPT.md](INSTALL-PROMPT.md).
 
 У `CHARLES_USER` / `CHARLES_PASS` нижче підставте свої дані від Charles Web Interface; наведені значення — заглушки.
 
@@ -102,8 +104,8 @@ claude mcp add-json charles '{
 На шляху B замініть ці два рядки на інтерпретатор самого віртуального оточення:
 
 ```json
-"command": "<PATH>/.venv/bin/python",
-"args": ["<PATH>/charles-mcp-server.py"]
+"command": "<PATH>/.venv/bin/charles-mcp",
+"args": []
 ```
 
 Kiro читає `.kiro/settings/mcp.json` у проєкті (він виграє) або `~/.kiro/settings/mcp.json` і додатково приймає `"disabled": false` та `"autoApprove": [...]`.

@@ -61,9 +61,22 @@ uv run python scripts/build_offline_archive.py
 ```bash
 unzip charles-mcp-<дата>.zip -d ~/Projects
 cd ~/Projects/charles-mcp
+./install.sh
+```
+
+Скрипт створює `.venv`, ставить принесені колеса, виконує `--selftest` і друкує
+готовий запис для вашого MCP-клієнта. Інший інтерпретатор — через
+`PYTHON=/шлях/до/python3 ./install.sh`. Руками це:
+
+```bash
 python3 -m venv .venv
 .venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+.venv/bin/pip install --no-index --no-deps wheels/charles_mcp-*.whl
 ```
+
+Другий рядок ставить сам форк — саме він дає команду `charles-mcp` і справжню
+версію у `--selftest`. Щоб доручити всю роботу агенту, дайте йому промпт із
+[INSTALL-PROMPT.md](../INSTALL-PROMPT.md).
 
 Офлайн це робить саме `--no-index`: pip не звертається до жодного реєстру і
 ставить рівно ті закріплені версії з хешами, на яких форк перевірявся. У
