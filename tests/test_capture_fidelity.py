@@ -14,6 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from charles_mcp.mocks.dispatcher import _patch_json
+from charles_mcp.mocks.fixtures import encode_fixture
 from charles_mcp.mocks.json_patch import dump_like, type_change_warnings
 from charles_mcp.mocks.rules import RuleResponse
 
@@ -94,3 +95,30 @@ def test_a_string_turned_into_a_number_is_reported() -> None:
     )
     assert len(warnings) == 1
     assert "string into a number" in warnings[0]
+
+
+def test_a_fixture_keeps_a_non_utf8_charset_when_it_fits() -> None:
+    body, content_type, warning = encode_fixture(
+        '{"місто":"Київ"}', "application/json; charset=windows-1251", "windows-1251"
+    )
+    assert warning is None
+    assert content_type.endswith("charset=windows-1251")
+    assert body.decode("windows-1251") == '{"місто":"Київ"}'
+
+
+def test_a_fixture_switches_to_utf8_and_says_so_when_the_charset_cannot_hold_it() -> None:
+    body, content_type, warning = encode_fixture(
+        '{"city":"東京"}', "application/json; charset=windows-1251", "windows-1251"
+    )
+    assert warning is not None and "UTF-8" in warning
+    assert content_type == "application/json; charset=utf-8"
+    assert body.decode("utf-8") == '{"city":"東京"}'
+
+
+def test_an_unknown_charset_falls_back_instead_of_raising() -> None:
+    body, content_type, warning = encode_fixture(
+        '{"a":1}', "application/json; charset=x-made-up", "x-made-up"
+    )
+    assert warning is not None
+    assert content_type == "application/json; charset=utf-8"
+    assert body == b'{"a":1}'
