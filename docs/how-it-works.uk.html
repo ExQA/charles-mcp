@@ -394,12 +394,12 @@
         <p>Без цього кроку інструменти бачитимуть тільки хости без шляхів.</p>
       </li>
       <li>
-        <h3>Поставити форк</h3>
-        <p>Пакет у PyPI — це upstream без інструментів моків, тому ставимо з репозиторію команди.</p>
-        <pre>git clone https://github.com/ExQA/charles-mcp.git
-cd charles-mcp
+        <h3>Розпакувати архів з форком</h3>
+        <p>Пакет у PyPI — це upstream без інструментів моків, тому працюємо з архівом форка, який роздає команда. Розпакуйте його у постійну теку (наприклад <code>~/Projects/charles-mcp</code>) і з неї виконайте:</p>
+        <pre>cd ~/Projects/charles-mcp
 uv sync --locked --extra dev
 uv run python -m pytest -q</pre>
+        <p>Тести мають пройти повністю — це перевірка, що оточення зібралося правильно.</p>
       </li>
       <li>
         <h3>Додати сервер у конфіг Kiro</h3>
@@ -452,7 +452,7 @@ uv run python -m pytest -q</pre>
   </section>
 
   <footer>
-    <p>Деталі та контракт кожного інструмента — у репозиторії команди: <code>docs/agent-guide.uk.md</code>, <code>docs/charles-mapping.uk.md</code>, <code>docs/contracts/tools.uk.md</code>.</p>
+    <p>Деталі та контракт кожного інструмента — в архіві з форком: <code>docs/agent-guide.uk.md</code>, <code>docs/charles-mapping.uk.md</code>, <code>docs/contracts/tools.uk.md</code>.</p>
   </footer>
 
 </div>
