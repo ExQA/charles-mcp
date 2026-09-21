@@ -79,6 +79,16 @@ wrapper in the repository root, instead of `uv`:
 "args": ["/Users/<you>/Projects/charles-mcp/charles-mcp-server.py"]
 ```
 
+### Confirm the right build is installed
+
+```bash
+uv run --project <PATH> charles-mcp --selftest      # or: <PATH>/.venv/bin/python <PATH>/charles-mcp-server.py --selftest
+```
+
+It prints the version and the tool counts and ends with `OK`. `FAIL`, a count of
+0 mocking tools, or `--selftest` rejected as unknown all mean the upstream PyPI
+package was installed instead of this fork.
+
 ### MCP client configuration
 
 Point the client at the repository with an absolute path:

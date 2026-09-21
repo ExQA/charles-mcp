@@ -131,10 +131,9 @@ CHARLES_MANAGE_LIFECYCLE = "false"
 Install the charles-mcp MCP server from the local directory <PATH> and configure
 my MCP client to use it. Follow these steps exactly.
 
-CRITICAL RULE: never run `pip install charles-mcp`, `uvx charles-mcp` or
-`uv tool install charles-mcp`. The name charles-mcp on PyPI is a different,
-older package without the mocking tools, and it fails to start. Everything must
-come from the directory above and from the wheels/ folder inside it.
+Install only from that directory: the same name on PyPI is a different, older
+package, so a registry install looks healthy but has no mocking tools. Step 3
+checks for them, so do not skip it.
 
 Step 1 - Check the directory:
   Confirm <PATH> exists and contains pyproject.toml, charles_mcp/ and
@@ -153,12 +152,13 @@ Step 2 - Build the environment, preferring the offline path:
        cd <PATH> && uv sync --locked
   c) Otherwise tell me which of the two is missing instead of improvising.
 
-Step 3 - Verify the server starts:
-  Run it for about 3 seconds, then terminate it:
-    <PATH>/.venv/bin/python <PATH>/charles-mcp-server.py
-  (or `uv run --project <PATH> charles-mcp` if you took path 2b).
-  It must start with no import errors. A line about default credentials is
-  expected and fine.
+Step 3 - Verify the build, not just that something starts:
+    <PATH>/.venv/bin/python <PATH>/charles-mcp-server.py --selftest
+  (or `uv run --project <PATH> charles-mcp --selftest` if you took path 2b).
+  It prints the version and the tool counts and ends with OK. Stop and tell me
+  if it prints FAIL, reports 0 mocking tools, or rejects --selftest as an
+  unknown option: that build is not this fork, so the configuration would be
+  pointless. A line about default credentials is expected and fine.
 
 Step 4 - Detect my MCP client, first match wins:
   a) Kiro - .kiro/settings/mcp.json in the current project, else ~/.kiro/settings/mcp.json
