@@ -19,6 +19,7 @@ from charles_mcp.mocks.dispatcher import (
     DispatcherSettings,
     DispatcherThread,
 )
+from charles_mcp.mocks.fixtures import encode_fixture
 from charles_mcp.mocks.json_patch import (
     JsonPatchError,
     apply_patches,
@@ -543,10 +544,23 @@ class RuleService:
             # applies this rule's patches when it serves the fixture, so there
             # is nothing to re-serialise here. source_text is the body as the
             # server wrote it; full_text is the normalised rendering.
-            fixture = (response_body.source_text or response_body.full_text).encode("utf-8")
-            headers["Content-Type"] = (
+            fixture_text = response_body.source_text
+            if fixture_text is None:
+                fixture_text = response_body.full_text
+                if response_body.kind == "json":
+                    warnings.append(
+                        "stored the normalised body: the captured original was too large to keep "
+                        "whole, so its whitespace may differ from the server's response"
+                    )
+            content_type = (
                 entry.response.mime_type or response_body.mime_type or "application/json; charset=utf-8"
             )
+            fixture, content_type, charset_warning = encode_fixture(
+                fixture_text, content_type, response_body.charset
+            )
+            if charset_warning:
+                warnings.append(charset_warning)
+            headers["Content-Type"] = content_type
             status = status or entry.response_status or 200
             if request_patches or request_header_edits:
                 warnings.append(
