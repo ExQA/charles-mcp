@@ -40,6 +40,45 @@ Without network access to the repository, a maintainer can hand over a git bundl
 
 On macOS, keep the checkout out of iCloud-synced folders such as `~/Documents`; sync interferes with the virtual environment.
 
+## Install from the offline archive
+
+For machines that should not reach PyPI at all — or people who do not have `uv`
+— a maintainer builds an archive that carries its own dependencies:
+
+```bash
+uv run python scripts/build_offline_archive.py
+```
+
+It exports the pinned runtime closure from `uv.lock` into `requirements-lock.txt`,
+downloads those packages as wheels into `wheels/` for every Python version and
+platform listed in the script, and zips them together with the tracked tree of
+`HEAD`. Defaults cover Python 3.12-3.14 on Apple Silicon and Intel macOS; pass
+`--python-version` / `--platform` (both repeatable) for anything else, and
+`--out` for the archive path.
+
+Installing needs Python and nothing else — no `uv`, no network:
+
+```bash
+unzip charles-mcp-<date>.zip -d ~/Projects
+cd ~/Projects/charles-mcp
+python3 -m venv .venv
+.venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+```
+
+`--no-index` is what makes this offline: pip never contacts a registry, and
+installs exactly the pinned, hashed versions this fork was tested against. The
+wheelhouse holds several interpreter versions at once and pip picks the
+compatible file; if it reports that no matching distribution was found, that
+Python version was not built into this archive.
+
+The MCP client then runs the virtual environment's interpreter against the
+wrapper in the repository root, instead of `uv`:
+
+```json
+"command": "/Users/<you>/Projects/charles-mcp/.venv/bin/python",
+"args": ["/Users/<you>/Projects/charles-mcp/charles-mcp-server.py"]
+```
+
 ### MCP client configuration
 
 Point the client at the repository with an absolute path:
@@ -125,7 +164,8 @@ Copy `.env.example` to `.env` for local values; `.env` is git-ignored.
 1. Bump `[project].version` in `pyproject.toml`.
 2. Run `uv run ruff check charles_mcp tests`, `uv run mypy charles_mcp` and `uv run pytest -q`.
 3. Tag the commit and push the tag to the team repository.
-4. Announce the tag; everyone runs `git fetch && git checkout <tag> && uv sync --locked --extra dev` and restarts the MCP client.
+4. For archive-based teams, build the offline archive from that tag (`uv run python scripts/build_offline_archive.py`) and hand it over; its wheels come from the same lock, so the two install paths give identical versions.
+5. Announce the tag; everyone runs `git fetch && git checkout <tag> && uv sync --locked --extra dev` and restarts the MCP client.
 
 ## Security rules
 
