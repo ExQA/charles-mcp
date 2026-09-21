@@ -49,10 +49,10 @@ charles-mcp = "charles_mcp.main:main"
 charles-mcp-dispatcher = "charles_mcp.mocks.dispatcher:main"
 
 [project.urls]
-Homepage = "https://pypi.org/project/charles-mcp/"
-Documentation = "https://github.com/heizaheiza/Charles-mcp/blob/main/docs/README.md"
-Repository = "https://github.com/heizaheiza/Charles-mcp"
-Issues = "https://github.com/heizaheiza/Charles-mcp/issues"
+Homepage = "https://github.com/ExQA/charles-mcp"
+Documentation = "https://github.com/ExQA/charles-mcp/blob/main/docs/README.md"
+Repository = "https://github.com/ExQA/charles-mcp"
+Issues = "https://github.com/ExQA/charles-mcp/issues"
 
 [tool.setuptools]
 license-files = ["LICENSE"]
