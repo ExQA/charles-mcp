@@ -60,10 +60,12 @@ cd <PATH> && uv sync --locked
 **Path B — offline, from an archive that carries `wheels/`:** needs Python only.
 
 ```bash
-cd <PATH>
-python3 -m venv .venv
-.venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+cd <PATH> && ./install.sh
 ```
+
+It creates `.venv`, installs the bundled wheels including this fork itself,
+verifies the build and prints the client entry. Prefer an agent to do it? Give
+it the prompt in [INSTALL-PROMPT.md](INSTALL-PROMPT.md).
 
 Use your own Charles Web Interface credentials in `CHARLES_USER` / `CHARLES_PASS` below; the values here are placeholders.
 
@@ -103,8 +105,8 @@ claude mcp add-json charles '{
 On path B, replace those two lines with the virtual environment's own interpreter:
 
 ```json
-"command": "<PATH>/.venv/bin/python",
-"args": ["<PATH>/charles-mcp-server.py"]
+"command": "<PATH>/.venv/bin/charles-mcp",
+"args": []
 ```
 
 Kiro reads `.kiro/settings/mcp.json` in the project (it wins) or `~/.kiro/settings/mcp.json`, and also accepts `"disabled": false` and `"autoApprove": [...]`.

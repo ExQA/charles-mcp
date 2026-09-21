@@ -9,13 +9,15 @@ package, which has no mock tools. So the archive carries its own dependencies:
   pinned and hashed, so the archive installs exactly what this fork was tested
   against;
 - ``wheels/`` — those dependencies as wheels, one set per Python version and
-  platform asked for. ``pip`` picks the compatible file out of the directory,
-  so several sets can share it.
+  platform asked for (``pip`` picks the compatible file, so several sets share
+  the directory), plus this fork's own wheel.
 
-Install side (no uv, no network):
+Install side (no uv, no network): ``./install.sh`` in the unpacked archive, or
+by hand:
 
     python3 -m venv .venv
     .venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+    .venv/bin/pip install --no-index --no-deps wheels/charles_mcp-*.whl
 
 Usage:
 
@@ -148,6 +150,21 @@ def download_wheels(
             )
 
 
+def build_project_wheel(wheel_dir: Path) -> str:
+    """Build this fork's own wheel, so the archive installs the package too.
+
+    Without it the wheelhouse holds only dependencies and the server has to be
+    started from the source tree, which leaves no version to check and no
+    ``charles-mcp`` command. The wheel is pure Python (``py3-none-any``), so one
+    file serves every interpreter and architecture in the archive.
+    """
+    run(["uv", "build", "--wheel", "--out-dir", str(wheel_dir)], cwd=REPO_ROOT)
+    built = sorted(wheel_dir.glob("charles_mcp-*.whl"))
+    if not built:
+        sys.exit("uv build produced no wheel for charles-mcp")
+    return built[-1].name
+
+
 def export_tree(staging: Path) -> Path:
     """Unpack the tracked tree of HEAD into the staging directory."""
     tarball = staging / "tree.tar"
@@ -208,7 +225,9 @@ def main() -> None:
         count = export_requirements(requirements)
         print(f"runtime closure: {count} packages")
 
-        download_wheels(requirements, tree / "wheels", python_versions, platforms)
+        wheel_dir = tree / "wheels"
+        download_wheels(requirements, wheel_dir, python_versions, platforms)
+        print(f"project wheel: {build_project_wheel(wheel_dir)}")
 
         args.out.parent.mkdir(parents=True, exist_ok=True)
         made = shutil.make_archive(str(args.out.with_suffix("")), "zip", root_dir=staging)

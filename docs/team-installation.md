@@ -61,9 +61,22 @@ Installing needs Python and nothing else — no `uv`, no network:
 ```bash
 unzip charles-mcp-<date>.zip -d ~/Projects
 cd ~/Projects/charles-mcp
+./install.sh
+```
+
+The script builds `.venv`, installs the bundled wheels, runs `--selftest` and
+prints the entry for your MCP client. `PYTHON=/path/to/python3 ./install.sh`
+picks a different interpreter. By hand it is:
+
+```bash
 python3 -m venv .venv
 .venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+.venv/bin/pip install --no-index --no-deps wheels/charles_mcp-*.whl
 ```
+
+The second line installs the fork itself, which is what gives you the
+`charles-mcp` command and a real version in `--selftest`. To hand the whole job
+to an agent instead, give it the prompt in [INSTALL-PROMPT.md](../INSTALL-PROMPT.md).
 
 `--no-index` is what makes this offline: pip never contacts a registry, and
 installs exactly the pinned, hashed versions this fork was tested against. The
