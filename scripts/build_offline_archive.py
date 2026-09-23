@@ -42,7 +42,10 @@ from pathlib import Path
 # (pydantic-core, brotli, zstandard, cffi) are built per version and per
 # architecture; pure-Python ones are shared, so extra sets cost little.
 DEFAULT_PYTHON_VERSIONS = ("3.12", "3.13", "3.14")
-DEFAULT_PLATFORMS = ("macosx_11_0_arm64", "macosx_10_15_x86_64")
+# Apple Silicon only: the team has no Intel Macs, and since cryptography 50
+# there are no Intel macOS wheels for it at all, so an x86_64 set cannot be
+# built without pinning a cryptography release that has open advisories.
+DEFAULT_PLATFORMS = ("macosx_11_0_arm64",)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ARCHIVE_PREFIX = "charles-mcp"

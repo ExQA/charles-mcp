@@ -52,7 +52,8 @@ uv run python scripts/build_offline_archive.py
 It exports the pinned runtime closure from `uv.lock` into `requirements-lock.txt`,
 downloads those packages as wheels into `wheels/` for every Python version and
 platform listed in the script, and zips them together with the tracked tree of
-`HEAD`. Defaults cover Python 3.12-3.14 on Apple Silicon and Intel macOS; pass
+`HEAD`. Defaults cover Python 3.12-3.14 on Apple Silicon (the team has no Intel
+Macs, and cryptography 50+ ships no Intel macOS wheels); pass
 `--python-version` / `--platform` (both repeatable) for anything else, and
 `--out` for the archive path.
 

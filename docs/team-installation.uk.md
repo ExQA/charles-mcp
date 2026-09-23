@@ -52,7 +52,8 @@ uv run python scripts/build_offline_archive.py
 Скрипт вивантажує з `uv.lock` закріплений набір рантайм-залежностей у
 `requirements-lock.txt`, качає їх як колеса в `wheels/` для кожної версії Python
 і платформи зі свого списку і пакує це разом із відстежуваним деревом `HEAD`.
-За замовчуванням — Python 3.12-3.14 для Apple Silicon та Intel macOS; для іншого
+За замовчуванням — Python 3.12-3.14 для Apple Silicon (Intel-Маків у команді немає, а
+cryptography 50+ не має коліс для Intel macOS); для іншого
 передайте `--python-version` / `--platform` (обидва можна повторювати), а шлях
 архіву — через `--out`.
 

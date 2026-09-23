@@ -97,7 +97,7 @@ command still lands on upstream 3.0.3.
 | Complexity | Medium — a build script the maintainer runs |
 | Network at install | None |
 | Wrong-package risk | Removed by `--no-index` |
-| Size | 13 MB for the first interpreter/platform set, ~4 MB for each additional one (pure-Python wheels are shared); 32 MB for the six sets built by default |
+| Size | 13 MB for the first interpreter/platform set, ~4 MB for each additional one (pure-Python wheels are shared); about 18 MB for the three arm64 sets built by default |
 
 **Pros:** installs with Python alone; exact pinned, hashed versions; works on a
 machine cut off from public registries.
@@ -119,7 +119,7 @@ vendored portably; the tree stops matching `uv.lock`; upgrades become hand work.
 ## Trade-off analysis
 
 The real trade is **archive size and maintainer effort against install-time
-network and the wrong-package failure**. 32 MB and one script run per release buy
+network and the wrong-package failure**. 18 MB and one script run per release buy
 an install that cannot reach a registry and therefore cannot pick up upstream
 3.0.3 — a failure whose symptom (missing tools) does not name its cause.
 
@@ -150,5 +150,7 @@ wheelhouse cannot.
 2. [x] Document the offline path and the client configuration it needs in
        `docs/team-installation.md` and its Ukrainian translation.
 3. [x] Add the rebuild step to the release checklist.
-4. [ ] Confirm which Python versions the team actually runs and trim or extend
-       the default set accordingly.
+4. [x] Confirm what the team runs: Apple Silicon only, so the default set is
+       arm64 for Python 3.12-3.14. Intel was dropped when cryptography 50
+       stopped publishing Intel macOS wheels; supporting it again would mean
+       pinning an older cryptography with open advisories.
