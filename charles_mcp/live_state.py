@@ -42,6 +42,39 @@ class LiveCaptureState:
     warnings: list[str] = field(default_factory=list)
 
 
+CONTROL_HOST = "control.charles"
+
+
+def self_recording_warning(raw_items: list[dict[str, Any]]) -> str | None:
+    """Warn when Charles has recorded this server's own requests to its Web Interface.
+
+    Every tool call exports the session through the Charles proxy, and Charles
+    records that request like any other — with the whole export as its response
+    body. The next export then contains the previous one, so the session grows
+    with every call: in one QA run it went from 100 KB to 2 GB and each call
+    from 0.03 s to 25 s. The entries are filtered out of every result, which is
+    exactly why nobody notices; this puts the cost back in view.
+    """
+    count = 0
+    body_bytes = 0
+    for entry in raw_items:
+        if not isinstance(entry, dict) or entry.get("host") != CONTROL_HOST:
+            continue
+        count += 1
+        sizes = (entry.get("response") or {}).get("sizes") or {}
+        if isinstance(sizes.get("body"), int):
+            body_bytes += sizes["body"]
+    if not count:
+        return None
+    return (
+        f"charles_records_own_exports: the session holds {count} request(s) to "
+        f"{CONTROL_HOST} ({body_bytes / 1_048_576:.1f} MB) — this server's own session "
+        "exports, recorded by Charles. Each tool call adds another, so the session keeps "
+        "growing and every call gets slower. Fix once in Charles: Proxy → Recording "
+        f"Settings → Exclude → Add, Host `{CONTROL_HOST}`; then clear the session."
+    )
+
+
 class LiveCaptureManager:
     """Track one active live capture and compute incremental diffs."""
 
@@ -78,6 +111,8 @@ class LiveCaptureManager:
                     capture.items.append(entry)
             else:
                 capture.seen_keys.update(key for key, _ in prepared)
+            if warning := self_recording_warning(baseline_items):
+                capture.warnings.append(warning)
 
         self.active = capture
         return capture
@@ -115,6 +150,8 @@ class LiveCaptureManager:
         if len(prepared) < capture.last_export_count:
             warnings.append("session_reset_detected")
             status = "reset_detected"
+        if warning := self_recording_warning(raw_items):
+            warnings.append(warning)
 
         working_seen = capture.seen_keys if advance else set(capture.seen_keys)
         working_items = capture.items if advance else list(capture.items)
@@ -163,7 +200,7 @@ class LiveCaptureManager:
         for entry in raw_items:
             if not isinstance(entry, dict):
                 continue
-            if entry.get("host") == "control.charles":
+            if entry.get("host") == CONTROL_HOST:
                 continue
 
             fingerprint = self._fingerprint(entry)

@@ -145,10 +145,11 @@ A plain virtualenv also works: `python3 -m venv .venv && .venv/bin/python -m pip
 
 1. Start Charles and enable `Proxy -> Web Interface Settings` with a non-default username and password; keep "Allow anonymous access" off.
 2. Confirm the proxy port, normally `8888`.
-3. Enable SSL Proxying for the API hosts and install the Charles root certificate on the test device.
-4. Point the device at the computer's LAN address and the proxy port, and allow it in Charles access control.
-5. Keep `CHARLES_MANAGE_LIFECYCLE=false`.
-6. If config discovery fails, set `CHARLES_CONFIG_PATH`. On macOS with Charles 5 the file is `~/Library/Preferences/com.xk72.charles.config`.
+3. Exclude the server's own traffic from recording: `Proxy -> Recording Settings -> Exclude -> Add`, Host `control.charles`. Every tool call exports the session through the Charles proxy, and without this Charles records each export — with the whole session as its body — so the session grows on every call (100 KB to 2 GB in one test run) and the tools slow to tens of seconds. The server warns with `charles_records_own_exports` when it sees this.
+4. Enable SSL Proxying for the API hosts and install the Charles root certificate on the test device.
+5. Point the device at the computer's LAN address and the proxy port, and allow it in Charles access control.
+6. Keep `CHARLES_MANAGE_LIFECYCLE=false`.
+7. If config discovery fails, set `CHARLES_CONFIG_PATH`. On macOS with Charles 5 the file is `~/Library/Preferences/com.xk72.charles.config`.
 
 Tools that write the Charles config (`mock_setup_host`, `mock_route_setup` with `apply=true`) only work while Charles is closed: Charles rewrites its config from memory on quit, so edits made while it runs are lost. The tools never quit or start Charles; see [charles-mapping.md](charles-mapping.md) for the restart order, backups, rollback and troubleshooting.
 

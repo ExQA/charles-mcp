@@ -145,10 +145,11 @@ claude mcp add-json charles '{"type":"stdio","command":"uv","args":["run","--pro
 
 1. Запустіть Charles і ввімкніть `Proxy -> Web Interface Settings` зі своїми логіном і паролем, не типовими; «Allow anonymous access» не вмикайте.
 2. Перевірте порт проксі, зазвичай `8888`.
-3. Увімкніть SSL Proxying для хостів API і поставте кореневий сертифікат Charles на тестовий пристрій.
-4. Спрямуйте пристрій на LAN-адресу комп'ютера і порт проксі, дозвольте його в Access Control Charles.
-5. Лишіть `CHARLES_MANAGE_LIFECYCLE=false`.
-6. Якщо конфіг не знаходиться автоматично, задайте `CHARLES_CONFIG_PATH`. На macOS з Charles 5 це `~/Library/Preferences/com.xk72.charles.config`.
+3. Виключіть із запису власний трафік сервера: `Proxy -> Recording Settings -> Exclude -> Add`, Host `control.charles`. Кожен виклик інструмента вивантажує сесію через проксі Charles, і без цього Charles записує кожне вивантаження — з усією сесією як тілом, — тож сесія росте з кожним викликом (від 100 КБ до 2 ГБ за один тестовий прогін), а інструменти сповільнюються до десятків секунд. Сервер попереджає про це кодом `charles_records_own_exports`.
+4. Увімкніть SSL Proxying для хостів API і поставте кореневий сертифікат Charles на тестовий пристрій.
+5. Спрямуйте пристрій на LAN-адресу комп'ютера і порт проксі, дозвольте його в Access Control Charles.
+6. Лишіть `CHARLES_MANAGE_LIFECYCLE=false`.
+7. Якщо конфіг не знаходиться автоматично, задайте `CHARLES_CONFIG_PATH`. На macOS з Charles 5 це `~/Library/Preferences/com.xk72.charles.config`.
 
 Інструменти, які пишуть конфіг Charles (`mock_setup_host`, `mock_route_setup` з `apply=true`), працюють лише при закритому Charles: під час виходу він перезаписує конфіг з пам'яті, і правки, зроблені на льоту, втрачаються. Самі інструменти Charles не закривають і не запускають; порядок перезапуску, бекапи, відкат і діагностика — у [charles-mapping.uk.md](charles-mapping.uk.md).
 

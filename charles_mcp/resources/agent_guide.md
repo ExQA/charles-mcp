@@ -27,6 +27,7 @@ Everything an agent needs to use this MCP server correctly: the operating model,
 1. `charles_status` — Charles reachable? Web Interface credentials right? Active capture? Follow its `recommended_next_action`.
 2. HTTPS: Charles must have **SSL Proxying** enabled for the API hosts and the device must trust the Charles certificate. Without it Charles only sees a tunnel, the path is unknown, and path-based rules never fire.
 3. Session size: if exports are slow, suggest clearing the session before the scenario and, when only a phone is tested, turning off Proxy → macOS Proxy in Charles.
+4. A `charles_records_own_exports` warning means Charles is recording this server's own session exports, and the session will grow on every call. Relay the fix it names to the user — exclude host `control.charles` in Proxy → Recording Settings, then clear the session — rather than carrying on; clearing the session is theirs to do.
 
 ## 4. Identities
 
