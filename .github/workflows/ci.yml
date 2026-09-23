@@ -32,6 +32,24 @@ jobs:
       - name: Run mypy on package
         run: python -m mypy charles_mcp
 
+  audit:
+    name: Audit locked dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      # Audits the lock, not whatever pip resolves today: uv.lock is what the
+      # offline archive ships and what `uv sync --locked` installs.
+      - name: Check the runtime closure for known vulnerabilities
+        run: |
+          uv export --locked --no-dev --no-emit-project --format requirements-txt > requirements-lock.txt
+          uvx pip-audit --requirement requirements-lock.txt --no-deps --disable-pip --progress-spinner off
+
   test:
     runs-on: ubuntu-latest
     strategy:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import socket
 from pathlib import Path
@@ -40,6 +42,12 @@ from charles_mcp.mocks.rules import (
     parse_body_document,
     route_covers_rule_path,
     rule_path_matches,
+)
+from charles_mcp.mocks.scenarios import (
+    Scenario,
+    ScenarioRuleRef,
+    ScenarioStore,
+    validate_scenario_name,
 )
 from charles_mcp.mocks.store import (
     ANY_HOST,
@@ -171,6 +179,7 @@ class RuleService:
         self.traffic_query_service = traffic_query_service
         self.client_factory = client_factory
         self.store = store or RuleStore(config.mock_dir)
+        self.scenarios = ScenarioStore(self.store.root)
         self._dispatcher: DispatcherThread | None = None
 
     # ---- routes -------------------------------------------------------------
@@ -268,7 +277,7 @@ class RuleService:
             self.config.config_path,
             host=host_pattern,
             path=path_pattern,
-            backup_dir=Path(self.config.state_dir) / "charles-config-backups" / "map-remote",
+            backup_dir=Path(self.config.backup_dir) / "map-remote",
             dest_host=_LOOPBACK,
             dest_port=self.config.dispatcher_port,
             port=port,
@@ -537,7 +546,20 @@ class RuleService:
 
         fixture: bytes | None = None
         headers: dict[str, str] = {}
-        if mode == "fixture":
+        if mode == "fixture" and response_body.full_text is None and response_body.source_bytes:
+            # A binary response (protobuf, an image): there is no text form, so
+            # the fixture is the decoded payload, served byte for byte.
+            if response_patches:
+                raise ValueError(
+                    f"entry `{entry_id}` has a binary response, and patches edit JSON or form "
+                    "bodies only: create the fixture without response_patches"
+                )
+            fixture = response_body.source_bytes
+            headers["Content-Type"] = (
+                entry.response.mime_type or response_body.mime_type or "application/octet-stream"
+            )
+            status = status or entry.response_status or 200
+        elif mode == "fixture":
             if response_body.full_text is None or response_body.full_text_truncated:
                 raise ValueError(f"entry `{entry_id}` has no complete response body for a fixture")
             # Verbatim, including whitespace and key order: the dispatcher
@@ -562,11 +584,11 @@ class RuleService:
                 warnings.append(charset_warning)
             headers["Content-Type"] = content_type
             status = status or entry.response_status or 200
-            if request_patches or request_header_edits:
-                warnings.append(
-                    "request patches and header edits are ignored in fixture mode: "
-                    "nothing goes upstream"
-                )
+        if mode == "fixture" and (request_patches or request_header_edits):
+            warnings.append(
+                "request patches and header edits are ignored in fixture mode: "
+                "nothing goes upstream"
+            )
 
         rule = MockRule(
             id=new_id,
@@ -592,21 +614,36 @@ class RuleService:
         *,
         fixture_json: Any = None,
         fixture_text: str | None = None,
+        fixture_base64: str | None = None,
     ) -> RuleWriteResult:
-        if fixture_json is not None and fixture_text is not None:
-            raise ValueError("pass at most one of fixture_json or fixture_text")
+        given = [
+            name
+            for name, value in (
+                ("fixture_json", fixture_json),
+                ("fixture_text", fixture_text),
+                ("fixture_base64", fixture_base64),
+            )
+            if value is not None
+        ]
+        if len(given) > 1:
+            raise ValueError(f"pass at most one fixture, got {', '.join(given)}")
         parsed = MockRule.model_validate(rule)
         fixture: bytes | None = None
         if fixture_json is not None:
             fixture = (json.dumps(fixture_json, ensure_ascii=False, indent=2) + "\n").encode()
         elif fixture_text is not None:
             fixture = fixture_text.encode("utf-8")
+        elif fixture_base64 is not None:
+            try:
+                fixture = base64.b64decode(fixture_base64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError(f"fixture_base64 is not valid base64: {exc}") from exc
         if (
             parsed.response.mode == "fixture"
             and fixture is None
             and not self.store.fixture_path(parsed.host, parsed.id).is_file()
         ):
-            raise ValueError("fixture rules need fixture_json or fixture_text")
+            raise ValueError("fixture rules need fixture_json, fixture_text or fixture_base64")
         return self._save(parsed, fixture, [])
 
     def list_rules(self, host: str | None = None) -> RuleListResult:
@@ -653,6 +690,120 @@ class RuleService:
         rule = self.store.get_rule(host, rule_id).model_copy(update={"enabled": enabled})
         path, _ = self.store.save_rule(rule, archive_previous=False)
         return _summary(rule, path)
+
+    # ---- scenarios ----------------------------------------------------------
+
+    def _rule_exists(self, ref: ScenarioRuleRef) -> bool:
+        try:
+            self.store.get_rule(ref.host, ref.id)
+        except (FileNotFoundError, ValueError):
+            return False
+        return True
+
+    def save_scenario(
+        self,
+        name: str,
+        rules: list[dict[str, str]] | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Name a set of rules; without `rules`, the rules enabled right now."""
+        validate_scenario_name(name)  # before anything else: a bad name is the first error
+        if rules is None:
+            enabled, _errors = self.store.all_rules()
+            refs = [ScenarioRuleRef(host=rule.host, id=rule.id) for rule in enabled if rule.enabled]
+            if not refs:
+                raise ValueError(
+                    "no rules are enabled, so there is nothing to save: pass `rules` or enable "
+                    "the scenario's rules first"
+                )
+        else:
+            refs = [ScenarioRuleRef.model_validate(item) for item in rules]
+        missing = [ref.label for ref in refs if not self._rule_exists(ref)]
+        if missing:
+            raise ValueError(f"these rules do not exist: {', '.join(missing)}")
+        scenario = Scenario(name=name, description=description, rules=refs)
+        path = self.scenarios.save(scenario)
+        return {
+            "name": scenario.name,
+            "path": str(path),
+            "rules": [ref.label for ref in refs],
+            "next_step": f"Switch to it with mock_scenario_apply(name={scenario.name!r}).",
+        }
+
+    def list_scenarios(self) -> dict[str, Any]:
+        scenarios, errors = self.scenarios.list()
+        items = []
+        for scenario in scenarios:
+            # None marks a rule the scenario names but that no longer exists.
+            states: list[tuple[str, bool | None]] = []
+            for ref in scenario.rules:
+                try:
+                    states.append((ref.label, self.store.get_rule(ref.host, ref.id).enabled))
+                except (FileNotFoundError, ValueError):
+                    states.append((ref.label, None))
+            missing = [label for label, state in states if state is None]
+            items.append(
+                {
+                    "name": scenario.name,
+                    "description": scenario.description,
+                    "rules": [label for label, _ in states],
+                    "active": not missing and all(state for _, state in states),
+                    "missing_rules": missing,
+                }
+            )
+        return {"total": len(items), "items": items, "errors": errors}
+
+    def apply_scenario(
+        self, name: str, *, enabled: bool = True, exclusive: bool = True
+    ) -> dict[str, Any]:
+        """Switch a scenario's rules on (and, if exclusive, every other rule off), or off."""
+        scenario = self.scenarios.get(name)
+        wanted = {(ref.host, ref.id) for ref in scenario.rules}
+        switched_on: list[str] = []
+        switched_off: list[str] = []
+        missing: list[str] = []
+
+        for ref in scenario.rules:
+            try:
+                rule = self.store.get_rule(ref.host, ref.id)
+            except (FileNotFoundError, ValueError):
+                missing.append(ref.label)
+                continue
+            if rule.enabled != enabled:
+                self.set_rule_enabled(ref.host, ref.id, enabled)
+                (switched_on if enabled else switched_off).append(ref.label)
+
+        if enabled and exclusive:
+            # Another flow's mocks left on are the classic "why is this mocked?".
+            others, _errors = self.store.all_rules()
+            for rule in others:
+                if rule.enabled and (rule.host, rule.id) not in wanted:
+                    self.set_rule_enabled(rule.host, rule.id, False)
+                    switched_off.append(f"{rule.host}/{rule.id}")
+
+        if enabled:
+            next_step = (
+                "Rules take effect on the next request. The dispatcher must be running "
+                "(mock_dispatcher action=start); mock_dispatcher action=verify proves the path."
+            )
+        else:
+            next_step = "Matching requests now pass through to the real servers."
+        return {
+            "name": scenario.name,
+            "enabled": enabled,
+            "switched_on": switched_on,
+            "switched_off": switched_off,
+            "missing_rules": missing,
+            "next_step": next_step,
+        }
+
+    def remove_scenario(self, name: str) -> dict[str, Any]:
+        removed = self.scenarios.remove(name)
+        return {
+            "name": name,
+            "removed": removed,
+            "note": "Only the scenario was removed; its rules and fixtures are untouched.",
+        }
 
     def _save(
         self, rule: MockRule, fixture: bytes | None, warnings: list[str]
@@ -735,9 +886,14 @@ class RuleService:
                 f"{route.host}{path_pattern}: Charles answered 503, so it tried the real host "
                 "instead of the dispatcher; the mapping is not active"
             )
+        # The real server answered. The likeliest cause is that Map Remote is off
+        # or this mapping is disabled — QA saw exactly that reported as "the
+        # mapping does not cover this path", which sent people editing a
+        # mapping that was fine.
         return (
-            f"{route.host}{path_pattern}: answered by something else (HTTP "
-            f"{response.status_code}), so the mapping does not cover this path"
+            f"{route.host}{path_pattern}: the probe reached the real server (HTTP "
+            f"{response.status_code}) instead of the dispatcher. Map Remote is off, this "
+            "mapping is disabled in Charles, or it does not cover this path"
         )
 
     async def dispatcher(

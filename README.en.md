@@ -229,6 +229,7 @@ Step 7 - Report which client you configured and which config file you edited,
 | `CHARLES_CONFIG_PATH` | auto-detect | Charles config file path |
 | `CHARLES_REQUEST_TIMEOUT` | `10` | Control-plane HTTP timeout in seconds |
 | `CHARLES_MANAGE_LIFECYCLE` | `false` | Whether the MCP server should manage Charles startup and shutdown |
+| `CHARLES_RETENTION_DAYS` | `0` | Days to keep saved captures, reverse-analysis data and config backups; older ones are purged when the server starts. `0` disables it |
 | `CHARLES_REVERSE_STATE_DIR` | `${CHARLES_STATE_DIR}/reverse` | State root for reverse-analysis artifacts and SQLite data |
 | `CHARLES_MOCK_DIR` | `~/charles-mocks` | Root of the Map Local mock store; Charles maps `https://<host>/*` to `<CHARLES_MOCK_DIR>/<host>/`. Dispatcher rules live in `<CHARLES_MOCK_DIR>/_rules/` |
 | `CHARLES_DISPATCHER_PORT` | `18080` | Port of the local body-aware dispatcher that Map Remote routes point to |

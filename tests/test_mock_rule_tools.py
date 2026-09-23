@@ -514,3 +514,228 @@ async def test_a_patch_that_changes_a_number_type_warns(env) -> None:
         )
     )
     assert any("keep the type" in warning for warning in created["warnings"])
+
+
+def _binary_entry(payload: bytes, *, gzipped: bool, second: int = 1) -> dict:
+    import base64
+    import gzip as gzip_module
+
+    wire = gzip_module.compress(payload) if gzipped else payload
+    headers = [{"name": "Content-Type", "value": "application/x-protobuf"}]
+    if gzipped:
+        headers.append({"name": "Content-Encoding", "value": "gzip"})
+    entry = _entry("init", balance=0, second=second)
+    entry["response"] = {
+        "status": 200,
+        "mimeType": "application/x-protobuf",
+        "header": {"firstLine": "HTTP/1.1 200 OK", "headers": headers},
+        "body": {"text": base64.b64encode(wire).decode(), "encoded": True},
+    }
+    if gzipped:
+        entry["response"]["contentEncoding"] = "gzip"
+    return entry
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gzipped", [False, True])
+async def test_a_binary_response_becomes_a_byte_exact_fixture(env, gzipped: bool) -> None:
+    server, fake_client, config = env
+    payload = bytes(range(256)) * 4  # not valid UTF-8, so no text path can carry it
+    capture_id = await _capture(server, fake_client, [_binary_entry(payload, gzipped=gzipped)])
+    entry_id = await _entry_id(server, capture_id, '"init"')
+
+    created = _tool_result(
+        await server.call_tool(
+            "mock_rule_create_from_entry",
+            {
+                "source": "live",
+                "capture_id": capture_id,
+                "entry_id": entry_id,
+                "mode": "fixture",
+                "match_body_fields": ["/action"],
+                "rule_id": "proto",
+            },
+        )
+    )
+    stored = (Path(config.mock_dir) / "_rules" / "_any" / "proto.body").read_bytes()
+    # Decompressed: the dispatcher never sends Content-Encoding, so bytes left
+    # gzipped would reach the app undecodable.
+    assert stored == payload
+    rule = json.loads(
+        _tool_result(await server.call_tool("mock_rule_get", {"host": "*", "rule_id": "proto"}))[
+            "rule_json"
+        ]
+    )
+    assert rule["response"]["headers"]["Content-Type"] == "application/x-protobuf"
+    # The only expected warning is about the route this test does not set up.
+    assert all("no route" in warning for warning in created["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_a_binary_response_refuses_patches(env) -> None:
+    server, fake_client, _config = env
+    capture_id = await _capture(server, fake_client, [_binary_entry(b"\x00\x01", gzipped=False)])
+    entry_id = await _entry_id(server, capture_id, '"init"')
+
+    with pytest.raises(Exception, match="binary response"):
+        await server.call_tool(
+            "mock_rule_create_from_entry",
+            {
+                "source": "live",
+                "capture_id": capture_id,
+                "entry_id": entry_id,
+                "mode": "fixture",
+                "match_body_fields": ["/action"],
+                "response_patches": [{"op": "set", "path": "/x", "value": 1}],
+                "rule_id": "proto-patched",
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_hand_written_binary_fixture_is_stored_from_base64(env) -> None:
+    import base64
+
+    server, _fake_client, config = env
+    payload = b"\x08\x96\x01"  # a protobuf varint field
+    await server.call_tool(
+        "mock_rule_write",
+        {
+            "rule": {
+                "id": "hand-proto",
+                "host": "*",
+                "match": {"method": "POST", "path": "/api/v1/wallet"},
+                "response": {"mode": "fixture", "headers": {"Content-Type": "application/x-protobuf"}},
+            },
+            "fixture_base64": base64.b64encode(payload).decode(),
+        },
+    )
+    stored = (Path(config.mock_dir) / "_rules" / "_any" / "hand-proto.body").read_bytes()
+    assert stored == payload
+
+
+async def _rule(server, capture_id: str, entry_id: str, rule_id: str) -> None:
+    await server.call_tool(
+        "mock_rule_create_from_entry",
+        {
+            "source": "live",
+            "capture_id": capture_id,
+            "entry_id": entry_id,
+            "match_body_fields": ["/action"],
+            "rule_id": rule_id,
+        },
+    )
+
+
+async def _enabled(server) -> set[str]:
+    listed = _tool_result(await server.call_tool("mock_rule_list", {}))
+    return {item["id"] for item in listed["items"] if item["enabled"]}
+
+
+@pytest.mark.asyncio
+async def test_a_scenario_switches_flows_and_leaves_no_stray_mocks(env) -> None:
+    server, fake_client, _config = env
+    capture_id = await _capture(
+        server,
+        fake_client,
+        [_entry("init", balance=1, second=1), _entry("pay", balance=2, second=2)],
+    )
+    init_id = await _entry_id(server, capture_id, '"init"')
+    pay_id = await _entry_id(server, capture_id, '"pay"')
+    for rule_id, entry_id in (("login-ok", init_id), ("empty", init_id), ("pay-500", pay_id)):
+        await _rule(server, capture_id, entry_id, rule_id)
+
+    await server.call_tool(
+        "mock_scenario_save",
+        {"name": "payment-fails", "rules": [{"id": "login-ok"}, {"id": "pay-500"}]},
+    )
+    await server.call_tool("mock_scenario_save", {"name": "empty-wallet", "rules": [{"id": "empty"}]})
+
+    applied = _tool_result(await server.call_tool("mock_scenario_apply", {"name": "payment-fails"}))
+    assert await _enabled(server) == {"login-ok", "pay-500"}
+    assert "*/empty" in applied["switched_off"]  # the other flow's mock went off
+
+    await server.call_tool("mock_scenario_apply", {"name": "empty-wallet"})
+    assert await _enabled(server) == {"empty"}
+
+    listed = _tool_result(await server.call_tool("mock_scenario_list", {}))
+    active = {item["name"]: item["active"] for item in listed["items"]}
+    assert active == {"empty-wallet": True, "payment-fails": False}
+
+    await server.call_tool("mock_scenario_apply", {"name": "empty-wallet", "enabled": False})
+    assert await _enabled(server) == set()
+
+
+@pytest.mark.asyncio
+async def test_saving_without_rules_takes_the_enabled_ones(env) -> None:
+    server, fake_client, _config = env
+    capture_id = await _capture(server, fake_client, [_entry("init", balance=1, second=1)])
+    entry_id = await _entry_id(server, capture_id, '"init"')
+    await _rule(server, capture_id, entry_id, "a")
+    await _rule(server, capture_id, entry_id, "b")
+    await server.call_tool("mock_rule_set_enabled", {"host": "*", "rule_id": "b", "enabled": False})
+
+    saved = _tool_result(await server.call_tool("mock_scenario_save", {"name": "snapshot"}))
+
+    assert saved["rules"] == ["*/a"]
+
+
+@pytest.mark.asyncio
+async def test_a_scenario_cannot_name_a_missing_rule_or_escape_its_folder(env) -> None:
+    server, _fake_client, _config = env
+    with pytest.raises(Exception, match="do not exist"):
+        await server.call_tool(
+            "mock_scenario_save", {"name": "broken", "rules": [{"id": "no-such-rule"}]}
+        )
+    with pytest.raises(Exception, match="invalid scenario name"):
+        await server.call_tool(
+            "mock_scenario_save", {"name": "../escape", "rules": [{"id": "x"}]}
+        )
+
+
+@pytest.mark.asyncio
+async def test_removing_a_scenario_keeps_its_rules(env) -> None:
+    server, fake_client, _config = env
+    capture_id = await _capture(server, fake_client, [_entry("init", balance=1, second=1)])
+    entry_id = await _entry_id(server, capture_id, '"init"')
+    await _rule(server, capture_id, entry_id, "kept")
+    await server.call_tool("mock_scenario_save", {"name": "temp", "rules": [{"id": "kept"}]})
+
+    removed = _tool_result(await server.call_tool("mock_scenario_remove", {"name": "temp"}))
+
+    assert removed["removed"] is True
+    assert "kept" in await _enabled(server)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "headers", "expected"),
+    [
+        (200, {"X-Charles-MCP-Rule": "health"}, "routes it to the dispatcher"),
+        (503, {}, "the mapping is not active"),
+        # QA: a real server's 404 used to be reported as "the mapping does not
+        # cover this path", although the mapping was fine and simply disabled.
+        (404, {}, "reached the real server (HTTP 404)"),
+    ],
+)
+async def test_verify_names_the_likely_cause_for_each_probe_answer(
+    env, monkeypatch, status: int, headers: dict, expected: str
+) -> None:
+    import httpx
+
+    _server, _fake_client, config = env
+    service = rule_service_module.RuleService(config, traffic_query_service=None)
+    real_client = httpx.AsyncClient
+
+    def fake_client(**kwargs):
+        transport = httpx.MockTransport(lambda request: httpx.Response(status, headers=headers))
+        return real_client(transport=transport)
+
+    monkeypatch.setattr(rule_service_module.httpx, "AsyncClient", fake_client)
+    route = RouteConfig(host="dev.example.com", paths=["/api/*"])
+
+    message = await service._probe_through_charles(route, "/api/*")
+
+    assert expected in message
+    if status == 404:
+        assert "Map Remote is off" in message

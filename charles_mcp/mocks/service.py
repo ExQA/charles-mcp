@@ -125,7 +125,7 @@ class MockService:
             self.config.config_path,
             host=rule.host,
             dest_dir=rule.local_path,
-            backup_dir=Path(self.config.state_dir) / "charles-config-backups" / "mock-setup",
+            backup_dir=Path(self.config.backup_dir) / "mock-setup",
             protocol=rule.protocol,
             port=rule.port,
         )

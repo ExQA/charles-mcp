@@ -5,6 +5,7 @@ from __future__ import annotations
 import glob
 import logging
 import os
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,34 @@ def _default_base_dir() -> str:
 def _looks_like_repo_root(path: str) -> bool:
     root = Path(path)
     return (root / "pyproject.toml").exists() and (root / "charles_mcp").is_dir()
+
+
+BACKUP_DIR_NAME = "charles-config-backups"
+# Where reset_environment kept its backups before they shared one root with the
+# mock tools; adopted on first start so the baseline it restores from survives.
+LEGACY_BACKUP_DIR_NAME = "back"
+
+
+def _adopt_legacy_backups(legacy: Path, target: Path) -> None:
+    """Move backups from the old ``back/`` directory into the shared root.
+
+    Nothing is overwritten: an entry that already exists in the target stays
+    where it was, so a half-finished earlier move can never lose a backup.
+    """
+    if not legacy.is_dir():
+        return
+    target.mkdir(parents=True, exist_ok=True)
+    for entry in legacy.iterdir():
+        destination = target / entry.name
+        if destination.exists():
+            if entry.is_dir() and destination.is_dir():
+                _adopt_legacy_backups(entry, destination)
+            continue
+        shutil.move(str(entry), str(destination))
+    try:
+        legacy.rmdir()
+    except OSError:
+        pass  # something could not be moved without overwriting; leave it visible
 
 
 def _default_state_dir() -> str:
@@ -109,6 +138,9 @@ class Config:
     manage_charles_lifecycle: bool = field(
         default_factory=lambda: _env_bool("CHARLES_MANAGE_LIFECYCLE", False)
     )
+    # Days to keep saved captures, reverse-analysis data and Charles config
+    # backups; older ones are purged when the server starts. 0 disables it.
+    retention_days: int = field(default_factory=lambda: _env_int("CHARLES_RETENTION_DAYS", 0))
     reverse_replay_timeout_seconds: float = field(
         default_factory=lambda: _env_float("CHARLES_REVERSE_REPLAY_TIMEOUT", 20.0)
     )
@@ -163,7 +195,10 @@ class Config:
             self.backup_dir = env_backup_dir
         elif not self.backup_dir:
             target_root = configured_base_dir if prefer_base_dir else state_dir
-            self.backup_dir = str(target_root / "back")
+            # One root for every copy of the Charles config: reset_environment's
+            # baseline and the backups the mock tools take before writing.
+            self.backup_dir = str(target_root / BACKUP_DIR_NAME)
+            _adopt_legacy_backups(target_root / LEGACY_BACKUP_DIR_NAME, Path(self.backup_dir))
 
         env_config_path = os.getenv("CHARLES_CONFIG_PATH")
         if env_config_path and os.path.exists(env_config_path):

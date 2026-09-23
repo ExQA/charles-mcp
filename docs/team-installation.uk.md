@@ -52,7 +52,8 @@ uv run python scripts/build_offline_archive.py
 Скрипт вивантажує з `uv.lock` закріплений набір рантайм-залежностей у
 `requirements-lock.txt`, качає їх як колеса в `wheels/` для кожної версії Python
 і платформи зі свого списку і пакує це разом із відстежуваним деревом `HEAD`.
-За замовчуванням — Python 3.12-3.14 для Apple Silicon та Intel macOS; для іншого
+За замовчуванням — Python 3.12-3.14 для Apple Silicon (Intel-Маків у команді немає, а
+cryptography 50+ не має коліс для Intel macOS); для іншого
 передайте `--python-version` / `--platform` (обидва можна повторювати), а шлях
 архіву — через `--out`.
 
@@ -144,10 +145,11 @@ claude mcp add-json charles '{"type":"stdio","command":"uv","args":["run","--pro
 
 1. Запустіть Charles і ввімкніть `Proxy -> Web Interface Settings` зі своїми логіном і паролем, не типовими; «Allow anonymous access» не вмикайте.
 2. Перевірте порт проксі, зазвичай `8888`.
-3. Увімкніть SSL Proxying для хостів API і поставте кореневий сертифікат Charles на тестовий пристрій.
-4. Спрямуйте пристрій на LAN-адресу комп'ютера і порт проксі, дозвольте його в Access Control Charles.
-5. Лишіть `CHARLES_MANAGE_LIFECYCLE=false`.
-6. Якщо конфіг не знаходиться автоматично, задайте `CHARLES_CONFIG_PATH`. На macOS з Charles 5 це `~/Library/Preferences/com.xk72.charles.config`.
+3. Виключіть із запису власний трафік сервера: `Proxy -> Recording Settings -> Exclude -> Add`, Host `control.charles`. Кожен виклик інструмента вивантажує сесію через проксі Charles, і без цього Charles записує кожне вивантаження — з усією сесією як тілом, — тож сесія росте з кожним викликом (від 100 КБ до 2 ГБ за один тестовий прогін), а інструменти сповільнюються до десятків секунд. Сервер попереджає про це кодом `charles_records_own_exports`.
+4. Увімкніть SSL Proxying для хостів API і поставте кореневий сертифікат Charles на тестовий пристрій.
+5. Спрямуйте пристрій на LAN-адресу комп'ютера і порт проксі, дозвольте його в Access Control Charles.
+6. Лишіть `CHARLES_MANAGE_LIFECYCLE=false`.
+7. Якщо конфіг не знаходиться автоматично, задайте `CHARLES_CONFIG_PATH`. На macOS з Charles 5 це `~/Library/Preferences/com.xk72.charles.config`.
 
 Інструменти, які пишуть конфіг Charles (`mock_setup_host`, `mock_route_setup` з `apply=true`), працюють лише при закритому Charles: під час виходу він перезаписує конфіг з пам'яті, і правки, зроблені на льоту, втрачаються. Самі інструменти Charles не закривають і не запускають; порядок перезапуску, бекапи, відкат і діагностика — у [charles-mapping.uk.md](charles-mapping.uk.md).
 
@@ -175,6 +177,7 @@ claude mcp add-json charles '{"type":"stdio","command":"uv","args":["run","--pro
 | `CHARLES_PROXY_HOST` / `CHARLES_PROXY_PORT` | Адреса проксі Charles, зазвичай `127.0.0.1` і `8888` |
 | `CHARLES_CONFIG_PATH` | Явний шлях до конфіга Charles |
 | `CHARLES_MANAGE_LIFECYCLE` | Лишіть `false`, щоб сервер ніколи не закривав Charles користувача |
+| `CHARLES_RETENTION_DAYS` | Скільки днів тримати зняті дані на диску; старші знімки, дані reverse-аналізу і бекапи конфігу видаляються під час старту. За замовчуванням вимкнено (`0`) |
 | `CHARLES_STATE_DIR` / `CHARLES_REVERSE_STATE_DIR` | Стан користувача для захоплень і reverse-аналізу |
 | `CHARLES_MOCK_DIR` | Каталог моків користувача, за замовчуванням `~/charles-mocks` |
 | `CHARLES_DISPATCHER_PORT` / `CHARLES_DISPATCHER_TIMEOUT` | Порт диспетчера (за замовчуванням `18080`) і тайм-аут запитів до сервера в секундах (за замовчуванням `20`) |

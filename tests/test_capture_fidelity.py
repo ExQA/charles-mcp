@@ -122,3 +122,39 @@ def test_an_unknown_charset_falls_back_instead_of_raising() -> None:
     assert warning is not None
     assert content_type == "application/json; charset=utf-8"
     assert body == b'{"a":1}'
+
+
+def test_unchanged_numbers_keep_their_original_spelling() -> None:
+    original = '{"rate":0.10,"limit":1e3,"count":7,"balance":0.0}'
+    patched, warning = _patch_json(
+        original.encode(), [{"op": "set", "path": "/balance", "value": 1000.0}]
+    )
+    assert warning is None
+    # Only the patched value is written anew; json.dumps would have produced
+    # "rate":0.1 and "limit":1000.0.
+    assert patched.decode() == '{"rate":0.10,"limit":1e3,"count":7,"balance":1000.0}'
+
+
+def test_a_number_whose_type_the_patch_changed_is_not_respelled_back() -> None:
+    original = '{"amount":1}'
+    patched, _ = _patch_json(original.encode(), [{"op": "set", "path": "/amount", "value": 1.0}])
+    # The patch asked for a float; reusing the literal "1" would silently undo it.
+    assert patched.decode() == '{"amount":1.0}'
+
+
+def test_ascii_escaped_bodies_stay_escaped() -> None:
+    original = '{"city":"\\u041a\\u0438\\u0457\\u0432","n":1}'
+    patched, _ = _patch_json(original.encode(), [{"op": "set", "path": "/n", "value": 2}])
+    assert patched.decode() == '{"city":"\\u041a\\u0438\\u0457\\u0432","n":2}'
+
+
+def test_escaped_slashes_stay_escaped() -> None:
+    original = '{"url":"https:\\/\\/example.com\\/a","n":1}'
+    patched, _ = _patch_json(original.encode(), [{"op": "set", "path": "/n", "value": 2}])
+    assert patched.decode() == '{"url":"https:\\/\\/example.com\\/a","n":2}'
+
+
+def test_indented_output_matches_json_dumps_layout() -> None:
+    document = {"a": [1, {"b": None, "c": True}], "d": {}, "e": []}
+    original = json.dumps(document, indent=2)
+    assert dump_like(original, json.loads(original)).decode() == original

@@ -27,6 +27,7 @@ Everything an agent needs to use this MCP server correctly: the operating model,
 1. `charles_status` — Charles reachable? Web Interface credentials right? Active capture? Follow its `recommended_next_action`.
 2. HTTPS: Charles must have **SSL Proxying** enabled for the API hosts and the device must trust the Charles certificate. Without it Charles only sees a tunnel, the path is unknown, and path-based rules never fire.
 3. Session size: if exports are slow, suggest clearing the session before the scenario and, when only a phone is tested, turning off Proxy → macOS Proxy in Charles.
+4. A `charles_records_own_exports` warning means Charles is recording this server's own session exports, and the session will grow on every call. Relay the fix it names to the user — exclude host `control.charles` in Proxy → Recording Settings, then clear the session — rather than carrying on; clearing the session is theirs to do.
 
 ## 4. Identities
 
@@ -72,6 +73,7 @@ Keep identities between calls and never mix them across planes.
 | `charles_status` | Connectivity, active capture, suggested next step |
 | `throttling(preset)` | `3G`, `4G`, `5G`, `fibre`, `56k`, `256k`, `off`. Affects all Charles traffic; turn it off afterwards |
 | `reset_environment` | **Destructive** (rule 4) |
+| `purge_stored_data(older_than_days=30, scopes, dry_run=true)` | Deletes saved captures (`recordings`), reverse-analysis data with bodies (`reverse`) and Charles config backups (`backups`) older than the cut-off. Always run `dry_run=true` first, show the user the list, and delete only after they agree — it cannot be undone. Never touches reset_environment's baseline, the newest backup in each folder, or mocks. `CHARLES_RETENTION_DAYS` runs the same purge at every server start |
 
 ### 5.5 Reverse analysis
 
@@ -101,6 +103,9 @@ Limits: status is always 200; the query string and HTTP method are ignored (all 
 | `mock_rule_set_enabled(host, rule_id, enabled)`, `mock_rule_remove(host, rule_id)` | Pause or archive a rule. `host` is the **rule's** host: `*` for general rules |
 | `mock_dispatcher(action="start" / "stop" / "status", port, toggle_map_remote=true)` | Start also turns Charles Map Remote on; stop turns it off. The dispatcher lives inside the MCP server and stops with it; for long runs the user can start `charles-mcp-dispatcher --port 18080` in a terminal instead |
 | `mock_dispatcher(action="verify")` | Proves the whole path without the app: it probes the dispatcher directly, then sends one probe per route through the Charles proxy and says for each whether Charles routed it. Use it whenever a rule seems not to fire — most often the answer is that Charles was never restarted after `apply=true` |
+| `mock_scenario_save(name, rules=None, description)` | Names a set of rules — a whole QA flow such as "payment fails after login". Without `rules` it saves the rules enabled right now, so the usual order is: build the rules, enable exactly those, save |
+| `mock_scenario_apply(name, enabled=true, exclusive=true)` | Switches a flow on in one call; `exclusive` turns every other rule off so mocks from the previous flow cannot linger. `enabled=false` turns only this scenario's rules off |
+| `mock_scenario_list()` / `mock_scenario_remove(name)` | Shows which scenarios are fully active and which refer to rules that no longer exist; removing a scenario never touches its rules |
 
 ## 6. Main workflow: fake data from a real session
 
