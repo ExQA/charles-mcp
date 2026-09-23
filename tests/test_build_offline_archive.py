@@ -103,3 +103,16 @@ def test_export_requirements_counts_distributions_not_lines(
     target = tmp_path / "requirements-lock.txt"
     assert script.export_requirements(target) == 2
     assert target.read_text(encoding="utf-8") == exported
+
+
+def test_build_litter_is_removed_from_the_tree_that_ships(tmp_path: Path) -> None:
+    """setuptools writes build/ and *.egg-info into the staged copy the archive is made from."""
+    (tmp_path / "build" / "lib").mkdir(parents=True)
+    (tmp_path / "charles_mcp.egg-info").mkdir()
+    (tmp_path / "charles_mcp").mkdir()
+    (tmp_path / "pyproject.toml").write_text("[project]\n")
+
+    removed = script.remove_build_litter(tmp_path)
+
+    assert sorted(removed) == ["build", "charles_mcp.egg-info"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["charles_mcp", "pyproject.toml"]
