@@ -90,6 +90,7 @@ def register_reset_tools(mcp: FastMCP) -> None:
             connected=False,
         )
 
+        rejected_status: int | None = None
         try:
             async with deps.client_factory(deps.config) as client:
                 info = await client.get_info()
@@ -99,8 +100,20 @@ def register_reset_tools(mcp: FastMCP) -> None:
         except CharlesClientError as exc:
             result.connected = False
             result.error = str(exc)
+            status_code = getattr(exc, "status_code", None)
+            if status_code in (401, 403):
+                rejected_status = status_code
 
-        if not result.connected:
+        if not result.connected and rejected_status is not None:
+            # Charles is up and answered; only the credentials are wrong. Saying
+            # "unreachable" here sent people restarting a Charles that was fine.
+            result.recommended_next_action = (
+                "Charles is running but rejected the Web Interface credentials "
+                f"(HTTP {rejected_status}). Make CHARLES_USER and CHARLES_PASS in the MCP "
+                "client config match Proxy → Web Interface Settings in Charles, then "
+                "restart the MCP server."
+            )
+        elif not result.connected:
             result.recommended_next_action = (
                 "Charles is unreachable. Confirm Charles Proxy is running and the "
                 "Web Interface is enabled before retrying."
