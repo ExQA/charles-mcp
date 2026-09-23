@@ -39,17 +39,27 @@ path: an archive that carries its dependencies as wheels.
 
 `scripts/build_offline_archive.py` exports the pinned runtime closure from
 `uv.lock` into `requirements-lock.txt`, downloads those packages as wheels into
-`wheels/` for each requested Python version and platform, and zips both with the
-tracked tree of `HEAD`. Installing is stock Python:
+`wheels/` for each requested Python version and platform, adds this fork's own
+wheel (pure Python, so one file covers every set), and zips everything with the
+tracked tree of `HEAD`.
+
+Installing is one command in the unpacked archive, `./install.sh`, which runs
+stock Python:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+.venv/bin/pip install --no-index --no-deps wheels/charles_mcp-*.whl
+.venv/bin/charles-mcp --selftest
 ```
 
 `--no-index` is the point: pip never contacts a registry, so the upstream package
 cannot be pulled in by accident and no install traffic leaves the machine. The
-MCP client then runs `.venv/bin/python charles-mcp-server.py` instead of `uv`.
+dependencies are hash-checked; the fork is installed as a package, which gives
+the `charles-mcp` command and a real version. `--selftest` then fails loudly if
+the build has no mocking tools — what an upstream install would look like. The
+MCP client runs `<PATH>/.venv/bin/charles-mcp` instead of `uv`, and
+`INSTALL-PROMPT.md` hands the same job to an agent.
 
 ## Options considered
 

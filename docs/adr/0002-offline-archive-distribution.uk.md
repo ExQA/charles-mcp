@@ -38,18 +38,27 @@
 
 `scripts/build_offline_archive.py` вивантажує з `uv.lock` закріплений набір
 рантайм-залежностей у `requirements-lock.txt`, качає їх як колеса в `wheels/`
-для кожної замовленої версії Python і платформи та пакує все це разом із
-відстежуваним деревом `HEAD`. Встановлення — звичайним Python:
+для кожної замовленої версії Python і платформи, додає колесо самого форка
+(чистий Python, тож один файл підходить до всіх наборів) і пакує все разом із
+відстежуваним деревом `HEAD`.
+
+Встановлення — одна команда в розпакованому архіві, `./install.sh`, яка
+запускає звичайний Python:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install --no-index --find-links wheels -r requirements-lock.txt
+.venv/bin/pip install --no-index --no-deps wheels/charles_mcp-*.whl
+.venv/bin/charles-mcp --selftest
 ```
 
 Сенс саме в `--no-index`: pip не звертається до жодного реєстру, тому upstream
 не може потрапити всередину випадково і жодного трафіку встановлення з машини не
-виходить. MCP-клієнт тоді запускає `.venv/bin/python charles-mcp-server.py`, а
-не `uv`.
+виходить. Залежності перевіряються за хешами; форк ставиться як пакет, що дає
+команду `charles-mcp` і справжню версію. `--selftest` голосно падає, якщо в
+збірці немає інструментів моків, — саме так виглядала б установка upstream.
+MCP-клієнт запускає `<PATH>/.venv/bin/charles-mcp`, а не `uv`, а
+`INSTALL-PROMPT.md` доручає те саме агенту.
 
 ## Розглянуті варіанти
 
