@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import socket
 from pathlib import Path
@@ -537,7 +539,20 @@ class RuleService:
 
         fixture: bytes | None = None
         headers: dict[str, str] = {}
-        if mode == "fixture":
+        if mode == "fixture" and response_body.full_text is None and response_body.source_bytes:
+            # A binary response (protobuf, an image): there is no text form, so
+            # the fixture is the decoded payload, served byte for byte.
+            if response_patches:
+                raise ValueError(
+                    f"entry `{entry_id}` has a binary response, and patches edit JSON or form "
+                    "bodies only: create the fixture without response_patches"
+                )
+            fixture = response_body.source_bytes
+            headers["Content-Type"] = (
+                entry.response.mime_type or response_body.mime_type or "application/octet-stream"
+            )
+            status = status or entry.response_status or 200
+        elif mode == "fixture":
             if response_body.full_text is None or response_body.full_text_truncated:
                 raise ValueError(f"entry `{entry_id}` has no complete response body for a fixture")
             # Verbatim, including whitespace and key order: the dispatcher
@@ -562,11 +577,11 @@ class RuleService:
                 warnings.append(charset_warning)
             headers["Content-Type"] = content_type
             status = status or entry.response_status or 200
-            if request_patches or request_header_edits:
-                warnings.append(
-                    "request patches and header edits are ignored in fixture mode: "
-                    "nothing goes upstream"
-                )
+        if mode == "fixture" and (request_patches or request_header_edits):
+            warnings.append(
+                "request patches and header edits are ignored in fixture mode: "
+                "nothing goes upstream"
+            )
 
         rule = MockRule(
             id=new_id,
@@ -592,21 +607,36 @@ class RuleService:
         *,
         fixture_json: Any = None,
         fixture_text: str | None = None,
+        fixture_base64: str | None = None,
     ) -> RuleWriteResult:
-        if fixture_json is not None and fixture_text is not None:
-            raise ValueError("pass at most one of fixture_json or fixture_text")
+        given = [
+            name
+            for name, value in (
+                ("fixture_json", fixture_json),
+                ("fixture_text", fixture_text),
+                ("fixture_base64", fixture_base64),
+            )
+            if value is not None
+        ]
+        if len(given) > 1:
+            raise ValueError(f"pass at most one fixture, got {', '.join(given)}")
         parsed = MockRule.model_validate(rule)
         fixture: bytes | None = None
         if fixture_json is not None:
             fixture = (json.dumps(fixture_json, ensure_ascii=False, indent=2) + "\n").encode()
         elif fixture_text is not None:
             fixture = fixture_text.encode("utf-8")
+        elif fixture_base64 is not None:
+            try:
+                fixture = base64.b64decode(fixture_base64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError(f"fixture_base64 is not valid base64: {exc}") from exc
         if (
             parsed.response.mode == "fixture"
             and fixture is None
             and not self.store.fixture_path(parsed.host, parsed.id).is_file()
         ):
-            raise ValueError("fixture rules need fixture_json or fixture_text")
+            raise ValueError("fixture rules need fixture_json, fixture_text or fixture_base64")
         return self._save(parsed, fixture, [])
 
     def list_rules(self, host: str | None = None) -> RuleListResult:

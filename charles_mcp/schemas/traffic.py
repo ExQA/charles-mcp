@@ -54,6 +54,10 @@ class BodyContent(BaseModel):
     # grouping and previews are stable. A mock has to answer with what the
     # server actually sent, so the decoded original is kept here as well.
     source_text: str | None = Field(default=None, exclude=True)
+    # The decoded payload of a base64 body (protobuf, images, anything that is
+    # not text), content-encoding already removed. A fixture for a binary
+    # response is served from these bytes; there is no text form to use.
+    source_bytes: bytes | None = Field(default=None, exclude=True)
     parsed_json: dict[str, Any] | list[Any] | None = Field(default=None, exclude=True)
     parsed_form: dict[str, list[str]] | None = Field(default=None, exclude=True)
     multipart_summary: list[dict[str, Any]] = Field(default_factory=list)

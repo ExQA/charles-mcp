@@ -190,13 +190,22 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         rule: dict[str, Any],
         fixture_json: Any = None,
         fixture_text: str | None = None,
+        fixture_base64: str | None = None,
     ) -> RuleWriteResult:
         """Write a rule document directly (advanced; prefer mock_rule_create_from_entry).
         Shape: {"id", "host", "match": {"method", "path", "query", "headers",
         "body": {"/action": "init"}}, "request": {"patches"}, "response": {"mode":
         "fixture"|"patch", "status", "headers", "patches"}, "priority", "enabled"}.
-        Fixture rules need fixture_json or fixture_text unless a fixture exists."""
-        return service.write_rule(rule, fixture_json=fixture_json, fixture_text=fixture_text)
+        Fixture rules need one fixture unless it already exists: fixture_text
+        keeps the bytes exactly as given (use it to match a captured body),
+        fixture_json is written indented, and fixture_base64 carries a binary
+        body such as protobuf — set its Content-Type in response.headers."""
+        return service.write_rule(
+            rule,
+            fixture_json=fixture_json,
+            fixture_text=fixture_text,
+            fixture_base64=fixture_base64,
+        )
 
     @mcp.tool()
     async def mock_rule_list(host: str | None = None) -> RuleListResult:

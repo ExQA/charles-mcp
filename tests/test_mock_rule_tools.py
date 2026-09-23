@@ -514,3 +514,101 @@ async def test_a_patch_that_changes_a_number_type_warns(env) -> None:
         )
     )
     assert any("keep the type" in warning for warning in created["warnings"])
+
+
+def _binary_entry(payload: bytes, *, gzipped: bool, second: int = 1) -> dict:
+    import base64
+    import gzip as gzip_module
+
+    wire = gzip_module.compress(payload) if gzipped else payload
+    headers = [{"name": "Content-Type", "value": "application/x-protobuf"}]
+    if gzipped:
+        headers.append({"name": "Content-Encoding", "value": "gzip"})
+    entry = _entry("init", balance=0, second=second)
+    entry["response"] = {
+        "status": 200,
+        "mimeType": "application/x-protobuf",
+        "header": {"firstLine": "HTTP/1.1 200 OK", "headers": headers},
+        "body": {"text": base64.b64encode(wire).decode(), "encoded": True},
+    }
+    if gzipped:
+        entry["response"]["contentEncoding"] = "gzip"
+    return entry
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gzipped", [False, True])
+async def test_a_binary_response_becomes_a_byte_exact_fixture(env, gzipped: bool) -> None:
+    server, fake_client, config = env
+    payload = bytes(range(256)) * 4  # not valid UTF-8, so no text path can carry it
+    capture_id = await _capture(server, fake_client, [_binary_entry(payload, gzipped=gzipped)])
+    entry_id = await _entry_id(server, capture_id, '"init"')
+
+    created = _tool_result(
+        await server.call_tool(
+            "mock_rule_create_from_entry",
+            {
+                "source": "live",
+                "capture_id": capture_id,
+                "entry_id": entry_id,
+                "mode": "fixture",
+                "match_body_fields": ["/action"],
+                "rule_id": "proto",
+            },
+        )
+    )
+    stored = (Path(config.mock_dir) / "_rules" / "_any" / "proto.body").read_bytes()
+    # Decompressed: the dispatcher never sends Content-Encoding, so bytes left
+    # gzipped would reach the app undecodable.
+    assert stored == payload
+    rule = json.loads(
+        _tool_result(await server.call_tool("mock_rule_get", {"host": "*", "rule_id": "proto"}))[
+            "rule_json"
+        ]
+    )
+    assert rule["response"]["headers"]["Content-Type"] == "application/x-protobuf"
+    # The only expected warning is about the route this test does not set up.
+    assert all("no route" in warning for warning in created["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_a_binary_response_refuses_patches(env) -> None:
+    server, fake_client, _config = env
+    capture_id = await _capture(server, fake_client, [_binary_entry(b"\x00\x01", gzipped=False)])
+    entry_id = await _entry_id(server, capture_id, '"init"')
+
+    with pytest.raises(Exception, match="binary response"):
+        await server.call_tool(
+            "mock_rule_create_from_entry",
+            {
+                "source": "live",
+                "capture_id": capture_id,
+                "entry_id": entry_id,
+                "mode": "fixture",
+                "match_body_fields": ["/action"],
+                "response_patches": [{"op": "set", "path": "/x", "value": 1}],
+                "rule_id": "proto-patched",
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_hand_written_binary_fixture_is_stored_from_base64(env) -> None:
+    import base64
+
+    server, _fake_client, config = env
+    payload = b"\x08\x96\x01"  # a protobuf varint field
+    await server.call_tool(
+        "mock_rule_write",
+        {
+            "rule": {
+                "id": "hand-proto",
+                "host": "*",
+                "match": {"method": "POST", "path": "/api/v1/wallet"},
+                "response": {"mode": "fixture", "headers": {"Content-Type": "application/x-protobuf"}},
+            },
+            "fixture_base64": base64.b64encode(payload).decode(),
+        },
+    )
+    stored = (Path(config.mock_dir) / "_rules" / "_any" / "hand-proto.body").read_bytes()
+    assert stored == payload
