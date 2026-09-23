@@ -145,7 +145,7 @@ A plain virtualenv also works: `python3 -m venv .venv && .venv/bin/python -m pip
 
 1. Start Charles and enable `Proxy -> Web Interface Settings` with a non-default username and password; keep "Allow anonymous access" off.
 2. Confirm the proxy port, normally `8888`.
-3. Exclude the server's own traffic from recording: `Proxy -> Recording Settings -> Exclude -> Add`, Host `control.charles`. Every tool call exports the session through the Charles proxy, and without this Charles records each export — with the whole session as its body — so the session grows on every call (100 KB to 2 GB in one test run) and the tools slow to tens of seconds. The server warns with `charles_records_own_exports` when it sees this.
+3. Exclude the server's own traffic from recording: `Proxy -> Recording Settings -> Exclude -> Add`, Host `control.charles`. Every tool call exports the session through the Charles proxy, and without this Charles records each export — with the whole session as its body — so the session grows on every call (100 KB to 2 GB in one test run) and the tools slow to tens of seconds. The server warns with `charles_records_own_exports` when it sees this; `charles_recording_exclude(apply=true)` writes the exclusion for you while Charles is closed.
 4. Enable SSL Proxying for the API hosts and install the Charles root certificate on the test device.
 5. Point the device at the computer's LAN address and the proxy port, and allow it in Charles access control.
 6. Keep `CHARLES_MANAGE_LIFECYCLE=false`.

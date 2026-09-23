@@ -34,6 +34,7 @@ from charles_mcp.tools import (
 from charles_mcp.tools import (
     restore_config as _restore_config,
 )
+from charles_mcp.tools.charles_settings import register_charles_settings_tools
 from charles_mcp.tools.mock_rules import register_mock_rule_tools
 from charles_mcp.tools.mocks import register_mock_tools
 from charles_mcp.tools.purge import register_purge_tools, run_purge
@@ -154,5 +155,6 @@ def create_server(config: Config | None = None) -> FastMCP[ToolDependencies]:
         ),
     )
     register_purge_tools(mcp, config, reverse_runtime.config.database_path)
+    register_charles_settings_tools(mcp, config)
 
     return mcp
