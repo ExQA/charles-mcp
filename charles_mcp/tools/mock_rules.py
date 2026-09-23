@@ -246,3 +246,41 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         at startup — a mapping written while it ran, or written before the last start, is
         not active even though the file on disk looks right."""
         return await service.dispatcher(action, port, toggle_map_remote)
+
+    @mcp.tool()
+    async def mock_scenario_save(
+        name: str,
+        rules: list[dict[str, str]] | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Save a named set of dispatcher rules to switch on and off together.
+
+        `rules` is a list of {"host", "id"} (host defaults to "*"); omit it to save
+        the rules that are enabled right now. A scenario only refers to rules — it
+        never copies or deletes them. Name: lower-case letters, digits, . - _."""
+        return service.save_scenario(name, rules, description)
+
+    @mcp.tool()
+    async def mock_scenario_list() -> dict[str, Any]:
+        """List scenarios with their rules, whether each is fully active, and any
+        rules it refers to that no longer exist."""
+        return service.list_scenarios()
+
+    @mcp.tool()
+    async def mock_scenario_apply(
+        name: str,
+        enabled: bool = True,
+        exclusive: bool = True,
+    ) -> dict[str, Any]:
+        """Switch a scenario on or off in one call.
+
+        enabled=true turns its rules on and, with exclusive=true (default), turns
+        every other rule off, so mocks from a previous flow cannot linger.
+        enabled=false turns only its own rules off. Takes effect on the next request;
+        the dispatcher must be running (mock_dispatcher action=start)."""
+        return service.apply_scenario(name, enabled=enabled, exclusive=exclusive)
+
+    @mcp.tool()
+    async def mock_scenario_remove(name: str) -> dict[str, Any]:
+        """Delete a scenario. Its rules and fixtures are left untouched."""
+        return service.remove_scenario(name)

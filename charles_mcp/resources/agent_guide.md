@@ -102,6 +102,9 @@ Limits: status is always 200; the query string and HTTP method are ignored (all 
 | `mock_rule_set_enabled(host, rule_id, enabled)`, `mock_rule_remove(host, rule_id)` | Pause or archive a rule. `host` is the **rule's** host: `*` for general rules |
 | `mock_dispatcher(action="start" / "stop" / "status", port, toggle_map_remote=true)` | Start also turns Charles Map Remote on; stop turns it off. The dispatcher lives inside the MCP server and stops with it; for long runs the user can start `charles-mcp-dispatcher --port 18080` in a terminal instead |
 | `mock_dispatcher(action="verify")` | Proves the whole path without the app: it probes the dispatcher directly, then sends one probe per route through the Charles proxy and says for each whether Charles routed it. Use it whenever a rule seems not to fire — most often the answer is that Charles was never restarted after `apply=true` |
+| `mock_scenario_save(name, rules=None, description)` | Names a set of rules — a whole QA flow such as "payment fails after login". Without `rules` it saves the rules enabled right now, so the usual order is: build the rules, enable exactly those, save |
+| `mock_scenario_apply(name, enabled=true, exclusive=true)` | Switches a flow on in one call; `exclusive` turns every other rule off so mocks from the previous flow cannot linger. `enabled=false` turns only this scenario's rules off |
+| `mock_scenario_list()` / `mock_scenario_remove(name)` | Shows which scenarios are fully active and which refer to rules that no longer exist; removing a scenario never touches its rules |
 
 ## 6. Main workflow: fake data from a real session
 

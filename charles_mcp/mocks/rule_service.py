@@ -43,6 +43,12 @@ from charles_mcp.mocks.rules import (
     route_covers_rule_path,
     rule_path_matches,
 )
+from charles_mcp.mocks.scenarios import (
+    Scenario,
+    ScenarioRuleRef,
+    ScenarioStore,
+    validate_scenario_name,
+)
 from charles_mcp.mocks.store import (
     ANY_HOST,
     MockStore,
@@ -173,6 +179,7 @@ class RuleService:
         self.traffic_query_service = traffic_query_service
         self.client_factory = client_factory
         self.store = store or RuleStore(config.mock_dir)
+        self.scenarios = ScenarioStore(self.store.root)
         self._dispatcher: DispatcherThread | None = None
 
     # ---- routes -------------------------------------------------------------
@@ -683,6 +690,120 @@ class RuleService:
         rule = self.store.get_rule(host, rule_id).model_copy(update={"enabled": enabled})
         path, _ = self.store.save_rule(rule, archive_previous=False)
         return _summary(rule, path)
+
+    # ---- scenarios ----------------------------------------------------------
+
+    def _rule_exists(self, ref: ScenarioRuleRef) -> bool:
+        try:
+            self.store.get_rule(ref.host, ref.id)
+        except (FileNotFoundError, ValueError):
+            return False
+        return True
+
+    def save_scenario(
+        self,
+        name: str,
+        rules: list[dict[str, str]] | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Name a set of rules; without `rules`, the rules enabled right now."""
+        validate_scenario_name(name)  # before anything else: a bad name is the first error
+        if rules is None:
+            enabled, _errors = self.store.all_rules()
+            refs = [ScenarioRuleRef(host=rule.host, id=rule.id) for rule in enabled if rule.enabled]
+            if not refs:
+                raise ValueError(
+                    "no rules are enabled, so there is nothing to save: pass `rules` or enable "
+                    "the scenario's rules first"
+                )
+        else:
+            refs = [ScenarioRuleRef.model_validate(item) for item in rules]
+        missing = [ref.label for ref in refs if not self._rule_exists(ref)]
+        if missing:
+            raise ValueError(f"these rules do not exist: {', '.join(missing)}")
+        scenario = Scenario(name=name, description=description, rules=refs)
+        path = self.scenarios.save(scenario)
+        return {
+            "name": scenario.name,
+            "path": str(path),
+            "rules": [ref.label for ref in refs],
+            "next_step": f"Switch to it with mock_scenario_apply(name={scenario.name!r}).",
+        }
+
+    def list_scenarios(self) -> dict[str, Any]:
+        scenarios, errors = self.scenarios.list()
+        items = []
+        for scenario in scenarios:
+            # None marks a rule the scenario names but that no longer exists.
+            states: list[tuple[str, bool | None]] = []
+            for ref in scenario.rules:
+                try:
+                    states.append((ref.label, self.store.get_rule(ref.host, ref.id).enabled))
+                except (FileNotFoundError, ValueError):
+                    states.append((ref.label, None))
+            missing = [label for label, state in states if state is None]
+            items.append(
+                {
+                    "name": scenario.name,
+                    "description": scenario.description,
+                    "rules": [label for label, _ in states],
+                    "active": not missing and all(state for _, state in states),
+                    "missing_rules": missing,
+                }
+            )
+        return {"total": len(items), "items": items, "errors": errors}
+
+    def apply_scenario(
+        self, name: str, *, enabled: bool = True, exclusive: bool = True
+    ) -> dict[str, Any]:
+        """Switch a scenario's rules on (and, if exclusive, every other rule off), or off."""
+        scenario = self.scenarios.get(name)
+        wanted = {(ref.host, ref.id) for ref in scenario.rules}
+        switched_on: list[str] = []
+        switched_off: list[str] = []
+        missing: list[str] = []
+
+        for ref in scenario.rules:
+            try:
+                rule = self.store.get_rule(ref.host, ref.id)
+            except (FileNotFoundError, ValueError):
+                missing.append(ref.label)
+                continue
+            if rule.enabled != enabled:
+                self.set_rule_enabled(ref.host, ref.id, enabled)
+                (switched_on if enabled else switched_off).append(ref.label)
+
+        if enabled and exclusive:
+            # Another flow's mocks left on are the classic "why is this mocked?".
+            others, _errors = self.store.all_rules()
+            for rule in others:
+                if rule.enabled and (rule.host, rule.id) not in wanted:
+                    self.set_rule_enabled(rule.host, rule.id, False)
+                    switched_off.append(f"{rule.host}/{rule.id}")
+
+        if enabled:
+            next_step = (
+                "Rules take effect on the next request. The dispatcher must be running "
+                "(mock_dispatcher action=start); mock_dispatcher action=verify proves the path."
+            )
+        else:
+            next_step = "Matching requests now pass through to the real servers."
+        return {
+            "name": scenario.name,
+            "enabled": enabled,
+            "switched_on": switched_on,
+            "switched_off": switched_off,
+            "missing_rules": missing,
+            "next_step": next_step,
+        }
+
+    def remove_scenario(self, name: str) -> dict[str, Any]:
+        removed = self.scenarios.remove(name)
+        return {
+            "name": name,
+            "removed": removed,
+            "note": "Only the scenario was removed; its rules and fixtures are untouched.",
+        }
 
     def _save(
         self, rule: MockRule, fixture: bytes | None, warnings: list[str]

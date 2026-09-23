@@ -612,3 +612,96 @@ async def test_a_hand_written_binary_fixture_is_stored_from_base64(env) -> None:
     )
     stored = (Path(config.mock_dir) / "_rules" / "_any" / "hand-proto.body").read_bytes()
     assert stored == payload
+
+
+async def _rule(server, capture_id: str, entry_id: str, rule_id: str) -> None:
+    await server.call_tool(
+        "mock_rule_create_from_entry",
+        {
+            "source": "live",
+            "capture_id": capture_id,
+            "entry_id": entry_id,
+            "match_body_fields": ["/action"],
+            "rule_id": rule_id,
+        },
+    )
+
+
+async def _enabled(server) -> set[str]:
+    listed = _tool_result(await server.call_tool("mock_rule_list", {}))
+    return {item["id"] for item in listed["items"] if item["enabled"]}
+
+
+@pytest.mark.asyncio
+async def test_a_scenario_switches_flows_and_leaves_no_stray_mocks(env) -> None:
+    server, fake_client, _config = env
+    capture_id = await _capture(
+        server,
+        fake_client,
+        [_entry("init", balance=1, second=1), _entry("pay", balance=2, second=2)],
+    )
+    init_id = await _entry_id(server, capture_id, '"init"')
+    pay_id = await _entry_id(server, capture_id, '"pay"')
+    for rule_id, entry_id in (("login-ok", init_id), ("empty", init_id), ("pay-500", pay_id)):
+        await _rule(server, capture_id, entry_id, rule_id)
+
+    await server.call_tool(
+        "mock_scenario_save",
+        {"name": "payment-fails", "rules": [{"id": "login-ok"}, {"id": "pay-500"}]},
+    )
+    await server.call_tool("mock_scenario_save", {"name": "empty-wallet", "rules": [{"id": "empty"}]})
+
+    applied = _tool_result(await server.call_tool("mock_scenario_apply", {"name": "payment-fails"}))
+    assert await _enabled(server) == {"login-ok", "pay-500"}
+    assert "*/empty" in applied["switched_off"]  # the other flow's mock went off
+
+    await server.call_tool("mock_scenario_apply", {"name": "empty-wallet"})
+    assert await _enabled(server) == {"empty"}
+
+    listed = _tool_result(await server.call_tool("mock_scenario_list", {}))
+    active = {item["name"]: item["active"] for item in listed["items"]}
+    assert active == {"empty-wallet": True, "payment-fails": False}
+
+    await server.call_tool("mock_scenario_apply", {"name": "empty-wallet", "enabled": False})
+    assert await _enabled(server) == set()
+
+
+@pytest.mark.asyncio
+async def test_saving_without_rules_takes_the_enabled_ones(env) -> None:
+    server, fake_client, _config = env
+    capture_id = await _capture(server, fake_client, [_entry("init", balance=1, second=1)])
+    entry_id = await _entry_id(server, capture_id, '"init"')
+    await _rule(server, capture_id, entry_id, "a")
+    await _rule(server, capture_id, entry_id, "b")
+    await server.call_tool("mock_rule_set_enabled", {"host": "*", "rule_id": "b", "enabled": False})
+
+    saved = _tool_result(await server.call_tool("mock_scenario_save", {"name": "snapshot"}))
+
+    assert saved["rules"] == ["*/a"]
+
+
+@pytest.mark.asyncio
+async def test_a_scenario_cannot_name_a_missing_rule_or_escape_its_folder(env) -> None:
+    server, _fake_client, _config = env
+    with pytest.raises(Exception, match="do not exist"):
+        await server.call_tool(
+            "mock_scenario_save", {"name": "broken", "rules": [{"id": "no-such-rule"}]}
+        )
+    with pytest.raises(Exception, match="invalid scenario name"):
+        await server.call_tool(
+            "mock_scenario_save", {"name": "../escape", "rules": [{"id": "x"}]}
+        )
+
+
+@pytest.mark.asyncio
+async def test_removing_a_scenario_keeps_its_rules(env) -> None:
+    server, fake_client, _config = env
+    capture_id = await _capture(server, fake_client, [_entry("init", balance=1, second=1)])
+    entry_id = await _entry_id(server, capture_id, '"init"')
+    await _rule(server, capture_id, entry_id, "kept")
+    await server.call_tool("mock_scenario_save", {"name": "temp", "rules": [{"id": "kept"}]})
+
+    removed = _tool_result(await server.call_tool("mock_scenario_remove", {"name": "temp"}))
+
+    assert removed["removed"] is True
+    assert "kept" in await _enabled(server)

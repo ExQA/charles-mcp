@@ -57,6 +57,11 @@ CANONICAL_PUBLIC_TOOL_NAMES: tuple[str, ...] = (
     "mock_rule_set_enabled",
     "mock_rule_remove",
     "mock_dispatcher",
+    # Scenarios: named sets of dispatcher rules
+    "mock_scenario_save",
+    "mock_scenario_list",
+    "mock_scenario_apply",
+    "mock_scenario_remove",
     # Stored data
     "purge_stored_data",
 )
