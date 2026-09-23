@@ -886,9 +886,14 @@ class RuleService:
                 f"{route.host}{path_pattern}: Charles answered 503, so it tried the real host "
                 "instead of the dispatcher; the mapping is not active"
             )
+        # The real server answered. The likeliest cause is that Map Remote is off
+        # or this mapping is disabled — QA saw exactly that reported as "the
+        # mapping does not cover this path", which sent people editing a
+        # mapping that was fine.
         return (
-            f"{route.host}{path_pattern}: answered by something else (HTTP "
-            f"{response.status_code}), so the mapping does not cover this path"
+            f"{route.host}{path_pattern}: the probe reached the real server (HTTP "
+            f"{response.status_code}) instead of the dispatcher. Map Remote is off, this "
+            "mapping is disabled in Charles, or it does not cover this path"
         )
 
     async def dispatcher(

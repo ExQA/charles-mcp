@@ -705,3 +705,37 @@ async def test_removing_a_scenario_keeps_its_rules(env) -> None:
 
     assert removed["removed"] is True
     assert "kept" in await _enabled(server)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "headers", "expected"),
+    [
+        (200, {"X-Charles-MCP-Rule": "health"}, "routes it to the dispatcher"),
+        (503, {}, "the mapping is not active"),
+        # QA: a real server's 404 used to be reported as "the mapping does not
+        # cover this path", although the mapping was fine and simply disabled.
+        (404, {}, "reached the real server (HTTP 404)"),
+    ],
+)
+async def test_verify_names_the_likely_cause_for_each_probe_answer(
+    env, monkeypatch, status: int, headers: dict, expected: str
+) -> None:
+    import httpx
+
+    _server, _fake_client, config = env
+    service = rule_service_module.RuleService(config, traffic_query_service=None)
+    real_client = httpx.AsyncClient
+
+    def fake_client(**kwargs):
+        transport = httpx.MockTransport(lambda request: httpx.Response(status, headers=headers))
+        return real_client(transport=transport)
+
+    monkeypatch.setattr(rule_service_module.httpx, "AsyncClient", fake_client)
+    route = RouteConfig(host="dev.example.com", paths=["/api/*"])
+
+    message = await service._probe_through_charles(route, "/api/*")
+
+    assert expected in message
+    if status == 404:
+        assert "Map Remote is off" in message

@@ -241,7 +241,10 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         requests never point at a stopped dispatcher; mock files and rules stay.
         action="verify" proves the whole path end to end: it asks the dispatcher directly,
         then sends one harmless probe per route through the Charles proxy and reports
-        whether Charles actually routed it. Use it after writing a mapping with
+        whether Charles actually routed it. The probes are real requests, so they show
+        up in the Charles session, and when Map Remote is off the probe for an
+        exact-host route reaches that real server (a GET to /__charles-mcp/health,
+        no credentials). Use it after writing a mapping with
         apply=true and starting Charles, because Charles loads Map Remote mappings only
         at startup — a mapping written while it ran, or written before the last start, is
         not active even though the file on disk looks right."""
