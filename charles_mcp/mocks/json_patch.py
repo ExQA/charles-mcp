@@ -129,31 +129,113 @@ def type_change_warnings(document: Any, patches: list[dict[str, Any]], label: st
     return warnings
 
 
+class _NumberLiteral(str):
+    """A number exactly as the capture wrote it: ``0.10``, ``1e3``, ``-0``."""
+
+    @property
+    def is_float(self) -> bool:
+        return any(mark in self for mark in ".eE")
+
+
+def _same_number(value: int | float, literal: _NumberLiteral) -> bool:
+    """True when ``literal`` still spells ``value``, including whether it is a float."""
+    if isinstance(value, float) != literal.is_float:
+        return False
+    try:
+        return float(literal) == float(value)
+    except ValueError:
+        return False
+
+
+class _Style:
+    """How the capture was written, so a re-serialised body can match it."""
+
+    def __init__(self, original: str) -> None:
+        stripped = original.strip()
+        self.indent: str | None = None
+        if "\n" in stripped:
+            self.indent = "  "
+            for line in stripped.splitlines()[1:]:
+                if line.startswith("\t"):
+                    self.indent = "\t"
+                    break
+                leading = len(line) - len(line.lstrip(" "))
+                if leading:
+                    self.indent = " " * leading
+                    break
+        # Servers that escape every non-ASCII character keep doing so in the
+        # mock; so do servers (PHP, mostly) that escape "/" as "\/".
+        self.ensure_ascii = bool(re.search(r"\\u[0-9a-fA-F]{4}", original)) and original.isascii()
+        self.escape_slash = "\\/" in original
+        self.trailing_newline = original.endswith("\n")
+
+    def string(self, value: str) -> str:
+        text = json.dumps(value, ensure_ascii=self.ensure_ascii)
+        return text.replace("/", "\\/") if self.escape_slash else text
+
+
+def _write(value: Any, shadow: Any, style: _Style, level: int) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        if isinstance(shadow, _NumberLiteral) and _same_number(value, shadow):
+            return str(shadow)
+        return json.dumps(value)
+    if isinstance(value, str):
+        return style.string(value)
+    if isinstance(value, dict):
+        if not value:
+            return "{}"
+        key_separator = ": " if style.indent is not None else ":"
+        items = [
+            style.string(str(key))
+            + key_separator
+            + _write(item, shadow.get(key) if isinstance(shadow, dict) else None, style, level + 1)
+            for key, item in value.items()
+        ]
+        return _wrap("{", "}", items, style, level)
+    if isinstance(value, list):
+        if not value:
+            return "[]"
+        items = [
+            _write(
+                item,
+                shadow[index] if isinstance(shadow, list) and index < len(shadow) else None,
+                style,
+                level + 1,
+            )
+            for index, item in enumerate(value)
+        ]
+        return _wrap("[", "]", items, style, level)
+    return json.dumps(value, ensure_ascii=style.ensure_ascii)
+
+
+def _wrap(opening: str, closing: str, items: list[str], style: _Style, level: int) -> str:
+    if style.indent is None:
+        return opening + ",".join(items) + closing
+    inner = "\n" + style.indent * (level + 1)
+    return opening + inner + ("," + inner).join(items) + "\n" + style.indent * level + closing
+
+
 def dump_like(original: str, document: Any) -> bytes:
     """Serialise ``document`` in the shape ``original`` was written in.
 
     Apps parse more strictly than JSON requires, and a body that arrives
-    reshaped is a mock that fails while still answering 200. Whitespace rarely
-    breaks a parser on its own, but a reformatted body also hides real
-    differences when someone compares the mock with the capture, so the stored
-    and served bodies keep the captured layout: minified stays minified,
-    indented keeps its indent, and a trailing newline is kept or left off.
+    reshaped is a mock that fails while still answering 200. So a patched body
+    keeps the captured layout — minified or indented, the indent width, the
+    trailing newline, ``\\uXXXX`` and ``\\/`` escaping — and every number the
+    patch did not change keeps its original spelling: ``0.10`` stays ``0.10``
+    rather than becoming ``0.1``, ``1e3`` stays ``1e3``.
     """
-    stripped = original.strip()
-    if "\n" in stripped:
-        indent: int | str = 2
-        for line in stripped.splitlines()[1:]:
-            leading = len(line) - len(line.lstrip(" "))
-            if leading:
-                indent = leading
-                break
-            if line.startswith("\t"):
-                indent = "\t"
-                break
-        text = json.dumps(document, ensure_ascii=False, indent=indent)
-    else:
-        text = json.dumps(document, ensure_ascii=False, separators=(",", ":"))
-    if original.endswith("\n"):
+    style = _Style(original)
+    try:
+        shadow: Any = json.loads(original, parse_float=_NumberLiteral, parse_int=_NumberLiteral)
+    except ValueError:
+        shadow = None
+    text = _write(document, shadow, style, 0)
+    if style.trailing_newline:
         text += "\n"
     return text.encode("utf-8")
 

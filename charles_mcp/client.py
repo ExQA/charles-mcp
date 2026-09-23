@@ -31,7 +31,10 @@ class CharlesConnectionError(CharlesClientError):
 
 class CharlesAPIError(CharlesClientError):
     """Charles API call error."""
-    pass
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class CharlesClient:
@@ -159,7 +162,8 @@ class CharlesClient:
             raise CharlesConnectionError(f"request timed out: {e}") from e
         except httpx.HTTPStatusError as e:
             raise CharlesAPIError(
-                f"API call failed [{e.response.status_code}]: {endpoint}"
+                f"API call failed [{e.response.status_code}]: {endpoint}",
+                status_code=e.response.status_code,
             ) from e
         except httpx.RequestError as e:
             raise CharlesClientError(f"request error: {e}") from e
@@ -385,12 +389,8 @@ class CharlesClient:
         Returns:
             Optional[dict]: Charles info, or None on failure
         """
-        try:
-            response = await self._get("/")
-            return {"status": "connected", "response": response.text[:200]}
-        except CharlesClientError as e:
-            logger.error(f"failed to get Charles info: {e}")
-            return None
+        response = await self._get("/")
+        return {"status": "connected", "response": response.text[:200]}
 
     # ==================== Session files ====================
 

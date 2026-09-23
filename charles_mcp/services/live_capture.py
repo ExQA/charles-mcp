@@ -97,6 +97,7 @@ class LiveCaptureService:
             status="active",
             managed=managed,
             include_existing=True,
+            warnings=list(capture.warnings),
         )
 
     async def read(

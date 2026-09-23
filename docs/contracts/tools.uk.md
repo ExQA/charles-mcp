@@ -80,7 +80,12 @@
     "mock_rule_get",
     "mock_rule_set_enabled",
     "mock_rule_remove",
-    "mock_dispatcher"
+    "mock_dispatcher",
+    "mock_scenario_save",
+    "mock_scenario_list",
+    "mock_scenario_apply",
+    "mock_scenario_remove",
+    "purge_stored_data"
   ]
 }
 ```

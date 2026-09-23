@@ -72,6 +72,11 @@ def normalize_body(
     text = str(raw_text)
     warnings: list[str] = []
 
+    if encoded and include_full_body:
+        result.source_bytes = _decoded_payload(
+            text, content_encoding=content_encoding, max_bytes=max_full_body_chars
+        )
+
     if encoded:
         decoded_text, decoded_warnings = _decode_encoded_body(
             text,
@@ -83,6 +88,15 @@ def normalize_body(
         if decoded_text is not None:
             text = decoded_text
             result.kind = "base64"
+        elif "base64_decode_failed" not in decoded_warnings:
+            # Decoded fine but not text (protobuf, images). The base64 string
+            # itself must not fall through to the text branch below: it looks
+            # like text, and would then be served to the app as if it were the
+            # body. The bytes live in source_bytes.
+            result.kind = "binary"
+            result.preview_text = "[binary body omitted]"
+            result.decode_warnings.extend(warnings)
+            return result
 
     if content_encoding and content_encoding.lower() == "gzip":
         decompressed, gzip_warnings = _decode_gzip_text(text, charset=charset)
@@ -167,6 +181,26 @@ def normalize_body(
     result.kind = "binary"
     result.preview_text = "[binary body omitted]"
     return result
+
+
+def _decoded_payload(
+    text: str, *, content_encoding: str | None, max_bytes: int
+) -> bytes | None:
+    """The raw bytes of a base64 body, or None when they cannot be kept whole.
+
+    Gzip is removed because the dispatcher never sends a Content-Encoding
+    header; bytes that stayed compressed would reach the app undecodable.
+    """
+    try:
+        payload = base64.b64decode(text, validate=False)
+    except Exception:
+        return None
+    if content_encoding and content_encoding.lower() == "gzip":
+        try:
+            payload = gzip.decompress(payload)
+        except Exception:
+            return None
+    return payload if len(payload) <= max_bytes else None
 
 
 def _decode_encoded_body(

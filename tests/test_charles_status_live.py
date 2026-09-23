@@ -83,3 +83,35 @@ async def test_charles_status_recommends_start_live_capture_when_idle(
     assert status["live_capture"]["active_capture"] is None
     assert status["recommended_next_action"]
     assert "start_live_capture" in status["recommended_next_action"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        # QA: a wrong password was reported as "Charles is unreachable", which
+        # sent people restarting a Charles that was running fine.
+        ("api-401", "rejected the Web Interface credentials (HTTP 401)"),
+        ("connection", "Charles is unreachable"),
+    ],
+)
+async def test_charles_status_tells_a_wrong_password_from_charles_being_down(
+    monkeypatch, error: str, expected: str
+) -> None:
+    from charles_mcp.client import CharlesAPIError, CharlesConnectionError
+
+    fake_client = _fake_client_class()
+
+    async def failing_get_info(self):
+        if error == "api-401":
+            raise CharlesAPIError("API call failed [401]: /", status_code=401)
+        raise CharlesConnectionError("cannot connect to Charles")
+
+    fake_client.get_info = failing_get_info
+    monkeypatch.setattr(server_module, "CharlesClient", fake_client)
+    server = create_server()
+
+    status = _tool_result(await server.call_tool("charles_status", {}))
+
+    assert status["connected"] is False
+    assert expected in status["recommended_next_action"]

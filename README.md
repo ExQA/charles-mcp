@@ -228,6 +228,7 @@ Step 7 - Report which client you configured and which config file you edited,
 | `CHARLES_CONFIG_PATH` | автовизначення | Шлях до файлу конфігурації Charles |
 | `CHARLES_REQUEST_TIMEOUT` | `10` | Тайм-аут HTTP-запитів до Charles у секундах |
 | `CHARLES_MANAGE_LIFECYCLE` | `false` | Чи має MCP-сервер запускати і зупиняти Charles |
+| `CHARLES_RETENTION_DAYS` | `0` | Скільки днів зберігати знімки, дані reverse-аналізу і бекапи конфігу; старші видаляються під час старту сервера. `0` вимикає |
 | `CHARLES_REVERSE_STATE_DIR` | `${CHARLES_STATE_DIR}/reverse` | Каталог стану reverse-аналізу: артефакти і база SQLite |
 | `CHARLES_MOCK_DIR` | `~/charles-mocks` | Корінь сховища моків Map Local; Charles мапить `https://<host>/*` у `<CHARLES_MOCK_DIR>/<host>/`. Правила диспетчера лежать у `<CHARLES_MOCK_DIR>/_rules/` |
 | `CHARLES_DISPATCHER_PORT` | `18080` | Порт локального диспетчера, на який указують правила Map Remote |

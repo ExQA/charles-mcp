@@ -190,13 +190,22 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         rule: dict[str, Any],
         fixture_json: Any = None,
         fixture_text: str | None = None,
+        fixture_base64: str | None = None,
     ) -> RuleWriteResult:
         """Write a rule document directly (advanced; prefer mock_rule_create_from_entry).
         Shape: {"id", "host", "match": {"method", "path", "query", "headers",
         "body": {"/action": "init"}}, "request": {"patches"}, "response": {"mode":
         "fixture"|"patch", "status", "headers", "patches"}, "priority", "enabled"}.
-        Fixture rules need fixture_json or fixture_text unless a fixture exists."""
-        return service.write_rule(rule, fixture_json=fixture_json, fixture_text=fixture_text)
+        Fixture rules need one fixture unless it already exists: fixture_text
+        keeps the bytes exactly as given (use it to match a captured body),
+        fixture_json is written indented, and fixture_base64 carries a binary
+        body such as protobuf — set its Content-Type in response.headers."""
+        return service.write_rule(
+            rule,
+            fixture_json=fixture_json,
+            fixture_text=fixture_text,
+            fixture_base64=fixture_base64,
+        )
 
     @mcp.tool()
     async def mock_rule_list(host: str | None = None) -> RuleListResult:
@@ -232,8 +241,49 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         requests never point at a stopped dispatcher; mock files and rules stay.
         action="verify" proves the whole path end to end: it asks the dispatcher directly,
         then sends one harmless probe per route through the Charles proxy and reports
-        whether Charles actually routed it. Use it after writing a mapping with
+        whether Charles actually routed it. The probes are real requests, so they show
+        up in the Charles session, and when Map Remote is off the probe for an
+        exact-host route reaches that real server (a GET to /__charles-mcp/health,
+        no credentials). Use it after writing a mapping with
         apply=true and starting Charles, because Charles loads Map Remote mappings only
         at startup — a mapping written while it ran, or written before the last start, is
         not active even though the file on disk looks right."""
         return await service.dispatcher(action, port, toggle_map_remote)
+
+    @mcp.tool()
+    async def mock_scenario_save(
+        name: str,
+        rules: list[dict[str, str]] | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Save a named set of dispatcher rules to switch on and off together.
+
+        `rules` is a list of {"host", "id"} (host defaults to "*"); omit it to save
+        the rules that are enabled right now. A scenario only refers to rules — it
+        never copies or deletes them. Name: lower-case letters, digits, . - _."""
+        return service.save_scenario(name, rules, description)
+
+    @mcp.tool()
+    async def mock_scenario_list() -> dict[str, Any]:
+        """List scenarios with their rules, whether each is fully active, and any
+        rules it refers to that no longer exist."""
+        return service.list_scenarios()
+
+    @mcp.tool()
+    async def mock_scenario_apply(
+        name: str,
+        enabled: bool = True,
+        exclusive: bool = True,
+    ) -> dict[str, Any]:
+        """Switch a scenario on or off in one call.
+
+        enabled=true turns its rules on and, with exclusive=true (default), turns
+        every other rule off, so mocks from a previous flow cannot linger.
+        enabled=false turns only its own rules off. Takes effect on the next request;
+        the dispatcher must be running (mock_dispatcher action=start)."""
+        return service.apply_scenario(name, enabled=enabled, exclusive=exclusive)
+
+    @mcp.tool()
+    async def mock_scenario_remove(name: str) -> dict[str, Any]:
+        """Delete a scenario. Its rules and fixtures are left untouched."""
+        return service.remove_scenario(name)
