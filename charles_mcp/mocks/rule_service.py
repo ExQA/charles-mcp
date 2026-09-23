@@ -268,7 +268,7 @@ class RuleService:
             self.config.config_path,
             host=host_pattern,
             path=path_pattern,
-            backup_dir=Path(self.config.state_dir) / "charles-config-backups" / "map-remote",
+            backup_dir=Path(self.config.backup_dir) / "map-remote",
             dest_host=_LOOPBACK,
             dest_port=self.config.dispatcher_port,
             port=port,

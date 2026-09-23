@@ -49,7 +49,7 @@ class TestConfig:
         config = Config(base_dir=str(tmp_path))
 
         assert config.package_dir == str(tmp_path / "package")
-        assert config.backup_dir == str(tmp_path / "back")
+        assert config.backup_dir == str(tmp_path / config_module.BACKUP_DIR_NAME)
 
     def test_default_install_layout_uses_user_state_dir(self, tmp_path: Path) -> None:
         install_root = tmp_path / "site-packages" / "charles-mcp"
@@ -62,7 +62,7 @@ class TestConfig:
 
         assert config.base_dir == str(install_root)
         assert config.package_dir == str(state_root / "package")
-        assert config.backup_dir == str(state_root / "back")
+        assert config.backup_dir == str(state_root / config_module.BACKUP_DIR_NAME)
 
     def test_running_from_a_checkout_keeps_captures_out_of_the_repository(
         self, tmp_path: Path
@@ -77,7 +77,7 @@ class TestConfig:
                 config = Config(base_dir=str(repo_root))
 
         assert config.package_dir == str(state_root / "package")
-        assert config.backup_dir == str(state_root / "back")
+        assert config.backup_dir == str(state_root / config_module.BACKUP_DIR_NAME)
 
     def test_proxy_url(self) -> None:
         config = Config()
@@ -150,3 +150,33 @@ class TestUtils:
         assert "B" in format_bytes(500)
         assert "KB" in format_bytes(1536)
         assert "MB" in format_bytes(1048576)
+
+
+def test_legacy_backups_move_into_the_shared_root_without_overwriting(tmp_path: Path) -> None:
+    legacy = tmp_path / config_module.LEGACY_BACKUP_DIR_NAME
+    target = tmp_path / config_module.BACKUP_DIR_NAME
+    (legacy / "config").mkdir(parents=True)
+    (legacy / "config" / "charles.config").write_text("baseline")
+    (legacy / "map-remote").mkdir()
+    (legacy / "map-remote" / "old.config").write_text("old")
+    # Already present in the new root: must survive untouched.
+    (target / "map-remote").mkdir(parents=True)
+    (target / "map-remote" / "old.config").write_text("newer")
+
+    config_module._adopt_legacy_backups(legacy, target)
+
+    # reset_environment restores from here, so the baseline must have moved.
+    assert (target / "config" / "charles.config").read_text() == "baseline"
+    assert (target / "map-remote" / "old.config").read_text() == "newer"
+    # The conflicting copy is kept where it was rather than lost.
+    assert (legacy / "map-remote" / "old.config").read_text() == "old"
+
+
+def test_default_backup_root_is_shared_with_the_mock_tools(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CHARLES_STATE_DIR", str(tmp_path))
+    monkeypatch.delenv("CHARLES_BACKUP_DIR", raising=False)
+    reset_config()
+    try:
+        assert Path(get_config().backup_dir) == tmp_path / config_module.BACKUP_DIR_NAME
+    finally:
+        reset_config()
