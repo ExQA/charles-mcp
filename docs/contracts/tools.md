@@ -82,7 +82,8 @@ Defaults match the README:
     "mock_scenario_list",
     "mock_scenario_apply",
     "mock_scenario_remove",
-    "purge_stored_data"
+    "purge_stored_data",
+    "charles_recording_exclude"
   ]
 }
 ```

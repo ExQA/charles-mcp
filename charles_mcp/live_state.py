@@ -70,8 +70,10 @@ def self_recording_warning(raw_items: list[dict[str, Any]]) -> str | None:
         f"charles_records_own_exports: the session holds {count} request(s) to "
         f"{CONTROL_HOST} ({body_bytes / 1_048_576:.1f} MB) — this server's own session "
         "exports, recorded by Charles. Each tool call adds another, so the session keeps "
-        "growing and every call gets slower. Fix once in Charles: Proxy → Recording "
-        f"Settings → Exclude → Add, Host `{CONTROL_HOST}`; then clear the session."
+        "growing and every call gets slower. Fix once: exclude host "
+        f"`{CONTROL_HOST}` in Proxy → Recording Settings → Exclude (by hand, no restart), "
+        "or with charles_recording_exclude(apply=true) while Charles is closed; then clear "
+        "the session."
     )
 
 

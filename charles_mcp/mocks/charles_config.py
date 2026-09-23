@@ -49,6 +49,73 @@ class MapRemoteChange:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class RecordingExcludeChange:
+    config_path: str
+    host: str
+    backup_path: str | None = None
+    added: bool = False
+    already_excluded: bool = False
+
+
+# Where Charles keeps its top-level sections, in its own serialisation order
+# (read from CharlesConfiguration in charles.jar). A new recordingConfiguration
+# goes where Charles itself would write it.
+_SECTION_ORDER = (
+    "proxyConfiguration",
+    "dnsConfiguration",
+    "recordingConfiguration",
+    "accessControlConfiguration",
+)
+
+
+def recording_excludes(config_path: str | Path) -> list[str]:
+    """Hosts in Proxy > Recording Settings > Exclude, as saved in the config file."""
+    _path, _prolog, root = _load_config(config_path)
+    return [
+        (host.text or "").strip()
+        for host in root.findall(
+            "recordingConfiguration/ignoreHosts/locationPatterns/locationMatch/location/host"
+        )
+        if (host.text or "").strip()
+    ]
+
+
+def apply_recording_exclude(
+    config_path: str | Path, *, host: str, backup_dir: str | Path
+) -> RecordingExcludeChange:
+    """Add ``host`` to Proxy > Recording Settings > Exclude.
+
+    Charles stores the list as ``recordingConfiguration/ignoreHosts/
+    locationPatterns/locationMatch/location`` — the same location-pattern shape
+    it writes for the SSL Proxying list. The entry names the host only, so every
+    protocol, port and path on it is excluded. Idempotent: a host already in the
+    list is left alone and nothing is written.
+    """
+    config_file, prolog, root = _load_config(config_path)
+    change = RecordingExcludeChange(config_path=str(config_file), host=host)
+    if host in recording_excludes(config_file):
+        change.already_excluded = True
+        return change
+
+    recording = root.find("recordingConfiguration")
+    if recording is None:
+        recording = ET.Element("recordingConfiguration")
+        after = [
+            index
+            for index, child in enumerate(root)
+            if child.tag in _SECTION_ORDER[: _SECTION_ORDER.index("recordingConfiguration")]
+        ]
+        root.insert(after[-1] + 1 if after else 0, recording)
+
+    patterns = _child(_child(recording, "ignoreHosts"), "locationPatterns")
+    location = ET.SubElement(ET.SubElement(patterns, "locationMatch"), "location")
+    ET.SubElement(location, "host").text = host
+    change.added = True
+    change.backup_path = _write_config(config_file, prolog, root, backup_dir)
+    return change
+
+
 def _load_config(config_path: str | Path) -> tuple[Path, str, ET.Element]:
     path = Path(config_path)
     if not path.is_file():
