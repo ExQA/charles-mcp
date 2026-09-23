@@ -138,6 +138,9 @@ class Config:
     manage_charles_lifecycle: bool = field(
         default_factory=lambda: _env_bool("CHARLES_MANAGE_LIFECYCLE", False)
     )
+    # Days to keep saved captures, reverse-analysis data and Charles config
+    # backups; older ones are purged when the server starts. 0 disables it.
+    retention_days: int = field(default_factory=lambda: _env_int("CHARLES_RETENTION_DAYS", 0))
     reverse_replay_timeout_seconds: float = field(
         default_factory=lambda: _env_float("CHARLES_REVERSE_REPLAY_TIMEOUT", 20.0)
     )

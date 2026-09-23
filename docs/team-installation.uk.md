@@ -175,6 +175,7 @@ claude mcp add-json charles '{"type":"stdio","command":"uv","args":["run","--pro
 | `CHARLES_PROXY_HOST` / `CHARLES_PROXY_PORT` | Адреса проксі Charles, зазвичай `127.0.0.1` і `8888` |
 | `CHARLES_CONFIG_PATH` | Явний шлях до конфіга Charles |
 | `CHARLES_MANAGE_LIFECYCLE` | Лишіть `false`, щоб сервер ніколи не закривав Charles користувача |
+| `CHARLES_RETENTION_DAYS` | Скільки днів тримати зняті дані на диску; старші знімки, дані reverse-аналізу і бекапи конфігу видаляються під час старту. За замовчуванням вимкнено (`0`) |
 | `CHARLES_STATE_DIR` / `CHARLES_REVERSE_STATE_DIR` | Стан користувача для захоплень і reverse-аналізу |
 | `CHARLES_MOCK_DIR` | Каталог моків користувача, за замовчуванням `~/charles-mocks` |
 | `CHARLES_DISPATCHER_PORT` / `CHARLES_DISPATCHER_TIMEOUT` | Порт диспетчера (за замовчуванням `18080`) і тайм-аут запитів до сервера в секундах (за замовчуванням `20`) |

@@ -80,7 +80,8 @@
     "mock_rule_get",
     "mock_rule_set_enabled",
     "mock_rule_remove",
-    "mock_dispatcher"
+    "mock_dispatcher",
+    "purge_stored_data"
   ]
 }
 ```

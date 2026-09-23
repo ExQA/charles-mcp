@@ -36,6 +36,7 @@ from charles_mcp.tools import (
 )
 from charles_mcp.tools.mock_rules import register_mock_rule_tools
 from charles_mcp.tools.mocks import register_mock_tools
+from charles_mcp.tools.purge import register_purge_tools, run_purge
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,20 @@ def create_server(config: Config | None = None) -> FastMCP[ToolDependencies]:
     async def lifespan(server: FastMCP[ToolDependencies]) -> AsyncIterator[ToolDependencies]:
         logger.info("MCP service lifespan started")
 
+        if config.retention_days > 0:
+            # Opt-in: only when CHARLES_RETENTION_DAYS is set. A failure here
+            # must not keep the server from starting.
+            try:
+                purged = run_purge(
+                    config,
+                    reverse_runtime.config.database_path,
+                    older_than_days=config.retention_days,
+                    dry_run=False,
+                )
+                logger.info("retention: %s", purged["summary"])
+            except Exception:
+                logger.exception("retention purge failed; nothing further was removed")
+
         if config.manage_charles_lifecycle:
             backup_config(config)
 
@@ -138,5 +153,6 @@ def create_server(config: Config | None = None) -> FastMCP[ToolDependencies]:
             client_factory=CharlesClient,
         ),
     )
+    register_purge_tools(mcp, config, reverse_runtime.config.database_path)
 
     return mcp

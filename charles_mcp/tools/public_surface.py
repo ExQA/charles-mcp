@@ -57,5 +57,7 @@ CANONICAL_PUBLIC_TOOL_NAMES: tuple[str, ...] = (
     "mock_rule_set_enabled",
     "mock_rule_remove",
     "mock_dispatcher",
+    # Stored data
+    "purge_stored_data",
 )
 

@@ -175,6 +175,7 @@ Some apps parse a response more strictly than a JSON library would, so a fixture
 | `CHARLES_PROXY_HOST` / `CHARLES_PROXY_PORT` | Charles proxy endpoint, normally `127.0.0.1` and `8888` |
 | `CHARLES_CONFIG_PATH` | Explicit Charles config path |
 | `CHARLES_MANAGE_LIFECYCLE` | Keep `false` so the server never closes a user's Charles |
+| `CHARLES_RETENTION_DAYS` | Days to keep captured data on disk; older captures, reverse-analysis data and config backups are purged at server start. Off (`0`) by default |
 | `CHARLES_STATE_DIR` / `CHARLES_REVERSE_STATE_DIR` | Per-user state for captures and reverse analysis |
 | `CHARLES_MOCK_DIR` | Per-user mock root, default `~/charles-mocks` |
 | `CHARLES_DISPATCHER_PORT` / `CHARLES_DISPATCHER_TIMEOUT` | Dispatcher port (default `18080`) and upstream timeout in seconds (default `20`) |

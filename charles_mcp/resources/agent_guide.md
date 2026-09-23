@@ -72,6 +72,7 @@ Keep identities between calls and never mix them across planes.
 | `charles_status` | Connectivity, active capture, suggested next step |
 | `throttling(preset)` | `3G`, `4G`, `5G`, `fibre`, `56k`, `256k`, `off`. Affects all Charles traffic; turn it off afterwards |
 | `reset_environment` | **Destructive** (rule 4) |
+| `purge_stored_data(older_than_days=30, scopes, dry_run=true)` | Deletes saved captures (`recordings`), reverse-analysis data with bodies (`reverse`) and Charles config backups (`backups`) older than the cut-off. Always run `dry_run=true` first, show the user the list, and delete only after they agree — it cannot be undone. Never touches reset_environment's baseline, the newest backup in each folder, or mocks. `CHARLES_RETENTION_DAYS` runs the same purge at every server start |
 
 ### 5.5 Reverse analysis
 
