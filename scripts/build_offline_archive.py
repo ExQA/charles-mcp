@@ -161,14 +161,30 @@ def build_project_wheel(source: Path, wheel_dir: Path) -> str:
     ``charles-mcp`` command. The wheel is pure Python (``py3-none-any``), so one
     file serves every interpreter and architecture in the archive.
     """
-    # Built from the staged copy, not the working tree: the wheel then matches
-    # what the archive ships, and setuptools leaves its build/ and egg-info in
-    # the temporary directory instead of the repository.
+    # Built from the staged copy, not the working tree, so the wheel matches
+    # what the archive ships and the repository stays clean; setuptools' own
+    # leftovers are removed from the copy right after.
     run(["uv", "build", "--wheel", "--out-dir", str(wheel_dir), str(source)], cwd=REPO_ROOT)
+    remove_build_litter(source)
     built = sorted(wheel_dir.glob("charles_mcp-*.whl"))
     if not built:
         sys.exit("uv build produced no wheel for charles-mcp")
     return built[-1].name
+
+
+def remove_build_litter(source: Path) -> list[str]:
+    """Delete what setuptools leaves in the tree it built from.
+
+    The wheel is built from the staged copy that becomes the archive, so its
+    build/ and *.egg-info would otherwise ship to every teammate. Returns the
+    names removed.
+    """
+    removed: list[str] = []
+    for litter in [source / "build", *source.glob("*.egg-info")]:
+        if litter.is_dir():
+            shutil.rmtree(litter)
+            removed.append(litter.name)
+    return removed
 
 
 def export_tree(staging: Path) -> Path:
