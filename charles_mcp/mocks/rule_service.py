@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
+import html
 import json
 import logging
+import re
 import socket
 from pathlib import Path
 from typing import Any, Literal
@@ -87,6 +90,28 @@ _NEXT_STEP_AFTER_RULE = (
     "adds that header with the rule id. Requires a route covering the host and path "
     "(mock_route_setup) and a running dispatcher (mock_dispatcher action=start)."
 )
+
+
+_CHARLES_EXCEPTION = re.compile(
+    r"The actual exception reported was:\s*([\w.$]+)(?::\s*(.*?))?\s*(?:Charles Proxy,|$)", re.S
+)
+
+
+def parse_charles_error_page(page: str) -> tuple[str, str] | None:
+    """The Java exception Charles names on its error page, as (class, detail).
+
+    Charles answers a request it cannot forward with a 503 page that ends with
+    "The actual exception reported was: java.net.UnknownHostException: <name>:
+    ...". That line says which host Charles really tried to reach, which is the
+    difference between "the mapping did not apply" and "the mapping points
+    somewhere that does not exist".
+    """
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", page)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    match = _CHARLES_EXCEPTION.search(re.sub(r"\s+", " ", text))
+    if match is None:
+        return None
+    return match.group(1), (match.group(2) or "").strip()
 
 
 def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
@@ -965,6 +990,71 @@ class RuleService:
             return True, f"the dispatcher answers on {port}"
         return False, f"something else answers on {port}"
 
+    async def _refused_tunnel_reason(self, host: str) -> tuple[str, str] | None:
+        """Ask Charles for a tunnel to ``host`` and read why it says no.
+
+        httpx reports a refused CONNECT as a bare ProxyError and drops the page
+        Charles sent with it, so the page is fetched here with a plain socket.
+        None when Charles accepts the tunnel or cannot be asked.
+        """
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.config.proxy_host, self.config.proxy_port),
+                timeout=3.0,
+            )
+        except (OSError, asyncio.TimeoutError):
+            return None
+        try:
+            target = f"{host}:443"
+            writer.write(f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n".encode("ascii"))
+            await writer.drain()
+            data = b""
+            while len(data) < 16384:
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=8.0)
+                if not chunk:
+                    break
+                data += chunk
+                status_line = data.split(b"\r\n", 1)[0]
+                if b"\r\n" in data and b" 200" in status_line:
+                    return None  # the tunnel was granted; nothing to explain
+        except (OSError, asyncio.TimeoutError, UnicodeError):
+            return None
+        finally:
+            writer.close()
+        return parse_charles_error_page(data.decode("latin-1"))
+
+    def _explain_refused_probe(
+        self, label: str, host: str, reason: tuple[str, str] | None
+    ) -> str | None:
+        if reason is None:
+            return None
+        exception, detail = reason
+        port = self.config.dispatcher_port
+        if exception.endswith("UnknownHostException"):
+            # "<name>: nodename nor servname provided, or not known"
+            name = detail.rsplit(": ", 1)[0].strip() if ": " in detail else detail
+            if name.lower() == host.lower():
+                return (
+                    f"{label}: Charles tried to reach `{host}` itself and could not resolve it, "
+                    "so no Map Remote mapping applied to the probe. Map Remote is off, or the "
+                    "mapping is not loaded because Charles was not started after the config was "
+                    "written"
+                )
+            return (
+                f"{label}: Charles applied a Map Remote mapping, but its destination `{name}` is "
+                "not a host name, so every request under this route fails with 503. In Charles "
+                "open Tools > Map Remote, edit the mapping and set Map To: Protocol http, Host "
+                f"127.0.0.1, Port {port}, Path empty. A whole URL typed into the Host field "
+                "causes exactly this"
+            )
+        if exception.endswith("ConnectException"):
+            return (
+                f"{label}: Charles applied a Map Remote mapping, but nothing accepted the "
+                f"connection at its destination ({detail}). The mapping must point to "
+                f"http://127.0.0.1:{port}, where this dispatcher listens"
+            )
+        return f"{label}: Charles refused the probe ({exception}: {detail})"
+
     async def _probe_through_charles(self, route: RouteConfig, path_pattern: str) -> str:
         """Send one probe through the Charles proxy: does Charles route it here?"""
         target = probe_target(route, path_pattern)
@@ -983,6 +1073,14 @@ class RuleService:
             ) as client:
                 response = await client.get(url)
         except httpx.HTTPError as exc:
+            # Charles refused the tunnel. Its error page names the host it really
+            # tried, which tells a mapping that did not apply from one that points
+            # at a destination that does not exist.
+            explained = self._explain_refused_probe(
+                f"{route.host}{path_pattern}", host, await self._refused_tunnel_reason(host)
+            )
+            if explained is not None:
+                return explained
             return (
                 f"{route.host}{path_pattern}: Charles did not route the probe "
                 f"({type(exc).__name__}). Map Remote is off, or the mapping is not loaded because "

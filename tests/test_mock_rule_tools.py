@@ -853,3 +853,70 @@ async def test_verify_names_the_likely_cause_for_each_probe_answer(
     assert expected in message
     if status == 404:
         assert "Map Remote is off" in message
+
+
+# The two pages a real Charles 5 answered a refused CONNECT with (2026-11-10).
+_MAPPING_TO_A_URL = (
+    "<html><head><style>body { font-family: Arial; }</style></head><body>"
+    "<h1>Charles Error Report</h1><h2>Name lookup failed for remote host</h2>"
+    "<p>Charles failed to resolve the name of the remote host into an IP address. "
+    "Check that the URL is correct.</p><p>The actual exception reported was:</p>"
+    "<pre>java.net.UnknownHostException: http:&#x2F;&#x2F;127.0.0.1:18080: "
+    "nodename nor servname provided, or not known</pre>"
+    "<p>Charles Proxy, https://www.charlesproxy.com/</p></body></html>"
+)
+_NO_MAPPING = _MAPPING_TO_A_URL.replace(
+    "http:&#x2F;&#x2F;127.0.0.1:18080", "charles-mcp-probe.example.com"
+)
+
+
+def test_the_exception_on_a_charles_error_page_is_read_with_its_host() -> None:
+    assert rule_service_module.parse_charles_error_page(_MAPPING_TO_A_URL) == (
+        "java.net.UnknownHostException",
+        "http://127.0.0.1:18080: nodename nor servname provided, or not known",
+    )
+    assert rule_service_module.parse_charles_error_page("<html>no report here</html>") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page", "expected", "unexpected"),
+    [
+        # A URL typed into the Host field of the mapping: Charles applies the
+        # mapping and then cannot resolve "http://127.0.0.1:18080" as a name.
+        (_MAPPING_TO_A_URL, "destination `http://127.0.0.1:18080` is not a host name", "is off"),
+        # No mapping applied: Charles tried the unresolvable probe host itself.
+        (_NO_MAPPING, "no Map Remote mapping applied", "not a host name"),
+        # Charles could not be asked: the old, general answer.
+        (None, "Charles did not route the probe", "not a host name"),
+    ],
+    ids=["destination-is-a-url", "mapping-not-applied", "charles-silent"],
+)
+async def test_verify_tells_a_broken_mapping_from_a_missing_one(
+    env, monkeypatch, page: str | None, expected: str, unexpected: str
+) -> None:
+    import httpx
+
+    _server, _fake_client, config = env
+    service = rule_service_module.RuleService(config, traffic_query_service=None)
+    real_client = httpx.AsyncClient
+
+    def refusing_client(**kwargs):
+        def refuse(request):
+            raise httpx.ProxyError("503 Error")
+
+        return real_client(transport=httpx.MockTransport(refuse))
+
+    async def reason(self, host: str):
+        return rule_service_module.parse_charles_error_page(page) if page else None
+
+    monkeypatch.setattr(rule_service_module.httpx, "AsyncClient", refusing_client)
+    monkeypatch.setattr(rule_service_module.RuleService, "_refused_tunnel_reason", reason)
+    route = RouteConfig(host="*.example.com", paths=["/api/*"])
+
+    message = await service._probe_through_charles(route, "/api/*")
+
+    assert expected in message
+    assert unexpected not in message
+    if page == _MAPPING_TO_A_URL:
+        assert f"Port {config.dispatcher_port}" in message

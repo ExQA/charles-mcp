@@ -200,7 +200,7 @@ Verified on Charles 5.2.1: a host glob matches its subdomains, the path reaches 
 | Symptom | Cause |
 |---|---|
 | No `X-Charles-MCP-Rule` header | Map Remote off (start the dispatcher), the Charles rule was not saved (Cancel instead of Done), host/path/protocol mismatch, no SSL Proxying |
-| Charles 503 "Name lookup failed" | Map Remote did not apply; Charles went to the original host |
+| Charles 503 "Name lookup failed" | Either Map Remote did not apply and Charles went to the original host, or the mapping applied but its destination is not a host name (a whole URL typed into the Host field). `mock_dispatcher(action="verify")` reads Charles's error page and says which |
 | `passthrough` | Request reached the dispatcher but no rule matched: path, method, `action` value, disabled rule |
 | 421 from the dispatcher | Host or path not covered by a route — `mock_route_setup` |
 | 502 from the dispatcher | Upstream unreachable: network/VPN, timeout, certificate (`verify_tls`) |
