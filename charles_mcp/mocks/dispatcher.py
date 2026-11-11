@@ -27,6 +27,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from http.cookiejar import Cookie, CookieJar, CookiePolicy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -68,6 +69,33 @@ HEALTH_SUFFIX = "/__charles-mcp/health"
 _MAX_LINE = 65536
 
 
+class _NoCookies(CookiePolicy):
+    """A cookie policy that neither stores nor sends anything.
+
+    An httpx client keeps a cookie jar by default: it would remember the
+    Set-Cookie of one response and add it to every later request that has no
+    Cookie header of its own. The dispatcher is a pipe shared by every device
+    behind Charles, so that would hand one client's session to another.
+    Cookies travel only in the headers the dispatcher forwards as they are.
+    """
+
+    netscape = True
+    rfc2965 = False
+    hide_cookie2 = False
+
+    def set_ok(self, cookie: Cookie, request: Any) -> bool:
+        return False
+
+    def return_ok(self, cookie: Cookie, request: Any) -> bool:
+        return False
+
+    def domain_return_ok(self, domain: str, request: Any) -> bool:
+        return False
+
+    def path_return_ok(self, path: str, request: Any) -> bool:
+        return False
+
+
 @dataclass(frozen=True)
 class DispatcherSettings:
     mock_dir: str
@@ -99,6 +127,7 @@ class DispatcherServer(ThreadingHTTPServer):
                     verify=verify_tls,
                     timeout=self.settings.timeout_seconds,
                     follow_redirects=False,
+                    cookies=CookieJar(policy=_NoCookies()),
                 )
                 self._clients[verify_tls] = client
             return client
