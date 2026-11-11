@@ -14,7 +14,7 @@ Everything an agent needs to use this MCP server correctly: the operating model,
 1. **Never clear the user's Charles session** unless they explicitly ask. `start_live_capture` adopts the running session by default; pass `reset_session=true` only on an explicit request — a wrong wipe cannot be undone.
 2. **Never write the Charles config while Charles runs.** Charles rewrites its config from memory on quit, so the edit is lost. `apply=true` refuses while the proxy port is open; do not work around it.
 3. **Never quit or restart Charles without the user's consent.** Quitting loses the unsaved session. Ask the user to save it (File → Save Session) first.
-4. **Never call `reset_environment` unless the user asks for exactly that.** It quits Charles, overwrites its config from a backup and deletes saved recordings.
+4. **Never call `reset_environment` unless the user asks for exactly that.** It quits Charles, overwrites its config from a backup and deletes saved recordings. The backup exists only when the server manages Charles (`CHARLES_MANAGE_LIFECYCLE=true`); without one the tool changes nothing and says so.
 5. **Never replay requests or forward patched requests to production without consent.** `reverse_replay_entry` and dispatcher patch rules send real requests, with real credentials, to real servers.
 6. **Never write captured values into source code, tests, commits or shared files,** and never suggest committing `~/charles-mocks`. Use synthetic data when a mock must be shared.
 7. **Do not repeat secrets back to the user** (tokens, passwords, full card numbers) unless they are needed for the task; refer to them by field name.
