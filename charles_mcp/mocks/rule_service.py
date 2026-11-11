@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import socket
 from pathlib import Path
 from typing import Any, Literal
@@ -72,6 +73,8 @@ from charles_mcp.schemas.mocks import (
 from charles_mcp.schemas.traffic import CaptureSource, ResourceClassification, TrafficEntry
 from charles_mcp.services.traffic_query_orchestrator import READ_ALL, keep_newest
 from charles_mcp.services.traffic_query_service import TrafficQueryService
+
+logger = logging.getLogger(__name__)
 
 _MAX_BODY_CHARS = 5_000_000
 _LOOPBACK = "127.0.0.1"
@@ -183,6 +186,8 @@ class RuleService:
         self.store = store or RuleStore(config.mock_dir)
         self.scenarios = ScenarioStore(self.store.root)
         self._dispatcher: DispatcherThread | None = None
+        # True while Map Remote is on in Charles because this server turned it on.
+        self._map_remote_is_ours = False
 
     # ---- routes -------------------------------------------------------------
 
@@ -896,8 +901,57 @@ class RuleService:
                 ok = await client.set_tool_enabled("map-remote", enabled)
         except Exception as exc:  # Charles down or web interface off
             return f"; could not {'enable' if enabled else 'disable'} Map Remote in Charles: {exc}"
+        if ok:
+            self._map_remote_is_ours = enabled
         state = "enabled" if enabled else "disabled"
         return f"; Map Remote {state} in Charles" if ok else f"; Charles refused to set Map Remote {state}"
+
+    async def _map_remote_enabled(self) -> bool | None:
+        """Whether Map Remote is on in Charles; None when Charles cannot say."""
+        if self.client_factory is None:
+            return None
+        try:
+            async with self.client_factory(self.config) as client:
+                reader = getattr(client, "get_tool_enabled", None)
+                return await reader("map-remote") if reader is not None else None
+        except Exception:  # Charles down or web interface off
+            return None
+
+    async def routing_warnings(self) -> list[str]:
+        """Say so when routed traffic is being sent to a dispatcher that is not there.
+
+        Map Remote stays on in Charles after the dispatcher is gone — a client
+        that was killed, a session that ended without mock_dispatcher stop. From
+        then on every request under a route fails in the app, and nothing in a
+        capture explains why.
+        """
+        routes = self.store.list_routes()
+        port = self.config.dispatcher_port
+        if not routes or _port_open(_LOOPBACK, port):
+            return []
+        if await self._map_remote_enabled() is not True:
+            return []
+        return [
+            f"map_remote_without_dispatcher: Map Remote is ON in Charles but nothing answers on "
+            f"the dispatcher port {port}, so requests to {', '.join(_route_labels(routes))} fail "
+            "in the app right now. Start the dispatcher with mock_dispatcher(action=\"start\") "
+            "or turn Map Remote off with mock_dispatcher(action=\"stop\")."
+        ]
+
+    async def shutdown(self) -> None:
+        """Leave Charles usable when the MCP server goes away.
+
+        The dispatcher lives inside the server process and dies with it. If this
+        server switched Map Remote on, it switches it off again; otherwise Charles
+        would keep sending the routed traffic to a port nobody listens on.
+        """
+        dispatcher = self._dispatcher
+        if dispatcher is not None and dispatcher.running:
+            dispatcher.stop()
+            logger.info("dispatcher stopped with the MCP server")
+        if self._map_remote_is_ours:
+            outcome = await self._set_map_remote(False)
+            logger.info("MCP server shutting down%s", outcome)
 
     async def _probe_dispatcher(self, port: int) -> tuple[bool, str]:
         """Ask the dispatcher itself, without Charles in the path."""
@@ -997,7 +1051,11 @@ class RuleService:
                 else:
                     message += "; routed requests fail until it starts again or Map Remote is off"
             else:
+                # Still worth switching Map Remote off: it may have been left on
+                # by a server that is gone, and then routed requests fail.
                 message = "this MCP server is not running a dispatcher"
+                if toggle_map_remote and not _port_open(_LOOPBACK, port):
+                    message += await self._set_map_remote(False)
         own = self._dispatcher is not None and self._dispatcher.running
         running = own or _port_open(_LOOPBACK, port)
         if action == "verify":
@@ -1014,11 +1072,15 @@ class RuleService:
                 )
             message = ". ".join(checks)
         elif action == "status":
-            message = (
-                "running inside this MCP server" if own
-                else "a dispatcher answers on this port" if running
-                else "not running; mapped routes fail until it starts"
-            )
+            if own:
+                message = "running inside this MCP server"
+            elif running:
+                message = "a dispatcher answers on this port"
+            else:
+                warnings = await self.routing_warnings()
+                message = warnings[0] if warnings else (
+                    "not running; if Map Remote is on in Charles, mapped routes fail until it starts"
+                )
         routes = self.store.list_routes()
         return DispatcherStatusResult(
             running=running,

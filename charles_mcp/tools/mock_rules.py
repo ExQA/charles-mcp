@@ -242,7 +242,10 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         A dispatcher started here lives inside the MCP server and stops with it; for a
         long-running one use the `charles-mcp-dispatcher` command. By default start also
         enables Charles Map Remote and stop disables it (toggle_map_remote), so routed
-        requests never point at a stopped dispatcher; mock files and rules stay.
+        requests never point at a stopped dispatcher; mock files and rules stay. The
+        server also switches Map Remote off when it exits, if it switched it on, and
+        stop switches it off even when no dispatcher is running here — the way out
+        when status reports `map_remote_without_dispatcher`.
         action="verify" proves the whole path end to end: it asks the dispatcher directly,
         then sends one harmless probe per route through the Charles proxy and reports
         whether Charles actually routed it. The probes are real requests, so they show

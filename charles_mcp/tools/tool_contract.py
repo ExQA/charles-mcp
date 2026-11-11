@@ -50,6 +50,8 @@ class ToolDependencies:
     history_service: RecordingHistoryService
     traffic_query_service: TrafficQueryService
     restore_config_fn: Callable[[Config], Awaitable[bool]]
+    # Reports mocked routes whose traffic Charles sends to a dispatcher that is gone.
+    routing_warnings_fn: Callable[[], Awaitable[list[str]]] | None = None
 
 
 ToolContext = Context[Any, ToolDependencies, Any]

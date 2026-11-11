@@ -72,7 +72,9 @@ def register_reset_tools(mcp: FastMCP) -> None:
         """Check Charles connectivity and active live-capture state.
         Returns recommended_next_action to nudge agents toward the live plane:
         when no active capture exists, agents should start_live_capture before
-        falling back to history-plane tools."""
+        falling back to history-plane tools. `warnings` lists what is broken
+        right now, e.g. Map Remote left on with no dispatcher running: tell the
+        user and fix it before anything else."""
         logger.info("Tool called: charles_status()")
         deps = get_tool_dependencies(ctx)
 
@@ -103,6 +105,12 @@ def register_reset_tools(mcp: FastMCP) -> None:
             status_code = getattr(exc, "status_code", None)
             if status_code in (401, 403):
                 rejected_status = status_code
+
+        if result.connected and deps.routing_warnings_fn is not None:
+            try:
+                result.warnings = await deps.routing_warnings_fn()
+            except Exception as exc:  # never let a side check break the status call
+                logger.debug("routing check failed: %s", exc)
 
         if not result.connected and rejected_status is not None:
             # Charles is up and answered; only the credentials are wrong. Saying

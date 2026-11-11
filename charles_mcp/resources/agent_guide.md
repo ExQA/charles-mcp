@@ -24,7 +24,7 @@ Everything an agent needs to use this MCP server correctly: the operating model,
 
 ## 3. First checks
 
-1. `charles_status` — Charles reachable? Web Interface credentials right? Active capture? Follow its `recommended_next_action`.
+1. `charles_status` — Charles reachable? Web Interface credentials right? Active capture? Follow its `recommended_next_action`. Its `warnings` name what is broken right now: `map_remote_without_dispatcher` means Map Remote is on in Charles while nothing listens on the dispatcher port, so every request under a mocked route fails in the app — tell the user, then start the dispatcher or run `mock_dispatcher(action="stop")`.
 2. HTTPS: Charles must have **SSL Proxying** enabled for the API hosts and the device must trust the Charles certificate. Without it Charles only sees a tunnel, the path is unknown, and path-based rules never fire. A `ssl_proxying_off` warning on a query means exactly this: only CONNECT tunnels were recorded for the capture or for the host you filtered by — tell the user instead of reporting that the app sent nothing.
 3. Session size: if exports are slow, suggest clearing the session before the scenario and, when only a phone is tested, turning off Proxy → macOS Proxy in Charles. A `slow_export` warning gives the measured time; every call that reads traffic pays it again. Detail of a finished request (`get_traffic_entry_detail`, creating a mock from it) is served from the last export and costs nothing extra.
 4. A `charles_records_own_exports` warning means Charles is recording this server's own session exports, and the session will grow on every call. Relay the fix to the user rather than carrying on: exclude host `control.charles` — by hand in Proxy → Recording Settings, or with `charles_recording_exclude(apply=true)` once they have quit Charles — then clear the session, which is theirs to do.
@@ -102,7 +102,7 @@ Limits: status is always 200; the query string and HTTP method are ignored (all 
 | `mock_rule_write(rule, fixture_json or fixture_text)` | Full rule document by hand (advanced) |
 | `mock_rule_list(host)`, `mock_rule_get(host, rule_id)` | Review; `errors` lists rule files the dispatcher ignores |
 | `mock_rule_set_enabled(host, rule_id, enabled)`, `mock_rule_remove(host, rule_id)` | Pause or archive a rule. `host` is the **rule's** host: `*` for general rules |
-| `mock_dispatcher(action="start" / "stop" / "status", port, toggle_map_remote=true)` | Start also turns Charles Map Remote on; stop turns it off. The dispatcher lives inside the MCP server and stops with it; for long runs the user can start `charles-mcp-dispatcher --port 18080` in a terminal instead |
+| `mock_dispatcher(action="start" / "stop" / "status", port, toggle_map_remote=true)` | Start also turns Charles Map Remote on; stop turns it off. The dispatcher lives inside the MCP server and stops with it — the server then switches Map Remote off again if it had switched it on. `stop` switches Map Remote off even when no dispatcher runs here: use it when `status` or `charles_status` reports `map_remote_without_dispatcher`. For long runs the user can start `charles-mcp-dispatcher --port 18080` in a terminal instead |
 | `mock_dispatcher(action="verify")` | Proves the whole path without the app: it probes the dispatcher directly, then sends one probe per route through the Charles proxy and says for each whether Charles routed it. Use it whenever a rule seems not to fire — most often the answer is that Charles was never restarted after `apply=true` |
 | `mock_scenario_save(name, rules=None, description)` | Names a set of rules — a whole QA flow such as "payment fails after login". Without `rules` it saves the rules enabled right now, so the usual order is: build the rules, enable exactly those, save |
 | `mock_scenario_apply(name, enabled=true, exclusive=true)` | Switches a flow on in one call; `exclusive` turns every other rule off so mocks from the previous flow cannot linger. `enabled=false` turns only this scenario's rules off |
@@ -204,7 +204,7 @@ Verified on Charles 5.2.1: a host glob matches its subdomains, the path reaches 
 | `passthrough` | Request reached the dispatcher but no rule matched: path, method, `action` value, disabled rule |
 | 421 from the dispatcher | Host or path not covered by a route — `mock_route_setup` |
 | 502 from the dispatcher | Upstream unreachable: network/VPN, timeout, certificate (`verify_tls`) |
-| Every request to the domain fails | Map Remote on, dispatcher not running |
+| Every request to the domain fails | Map Remote on, dispatcher not running: `charles_status` reports `map_remote_without_dispatcher`; start the dispatcher or `mock_dispatcher(action="stop")` |
 | `X-Charles-MCP-Warning` | A patch did not apply (non-JSON body, path not found); response sent without it |
 | Mocked value did not change in the app | The app may cache; ask the user to pull-to-refresh or relaunch; check the rule matched |
 | Exports are slow / time out | Session too big: clear it, turn off macOS proxy recording, narrow with `host_contains` |
