@@ -100,8 +100,11 @@ class _RawFilter:
             methods=frozenset(item.upper() for item in query.method_in),
         )
 
+    def host_matches(self, raw_entry: dict) -> bool:
+        return self.host is None or self.host in str(raw_entry.get("host") or "").lower()
+
     def matches(self, raw_entry: dict) -> bool:
-        if self.host is not None and self.host not in str(raw_entry.get("host") or "").lower():
+        if not self.host_matches(raw_entry):
             return False
         if self.path is not None and self.path not in str(raw_entry.get("path") or "").lower():
             return False
@@ -534,6 +537,8 @@ class TrafficQueryOrchestrator:
         )
         raw_filter = _RawFilter.from_query(effective_query)
         scanned_count = 0
+        tunnels_in_scope = 0
+        readable_in_scope = 0
         candidates: list[tuple[dict, str, ResourceClassification]] = []
 
         for raw in raw_entries:
@@ -556,6 +561,11 @@ class TrafficQueryOrchestrator:
                 if scope_cache is not None:
                     scope_cache[raw_hash] = (classification, None)
             classified_counts[classification.resource_class] += 1
+            if raw_filter.host_matches(raw):
+                if classification.resource_class == "connect_tunnel":
+                    tunnels_in_scope += 1
+                elif classification.resource_class != "control":
+                    readable_in_scope += 1
 
             if self._excluded_by_preset(classification.resource_class, effective_query):
                 filtered_out_by_class[classification.resource_class] += 1
@@ -563,6 +573,9 @@ class TrafficQueryOrchestrator:
             if not raw_filter.matches(raw):
                 continue
             candidates.append((raw, raw_hash, classification))
+
+        if tunnels_in_scope and not readable_in_scope:
+            warnings.append(self._ssl_proxying_hint(tunnels_in_scope, effective_query))
 
         truncated = len(candidates) > query.scan_limit
         if truncated:
@@ -646,6 +659,27 @@ class TrafficQueryOrchestrator:
         if not include_full_body:
             return SUMMARY_BODY_MODE
         return f"full:{max_body_chars}"
+
+    @staticmethod
+    def _ssl_proxying_hint(tunnel_count: int, query: TrafficQuery) -> str:
+        """Explain an empty result that is really a Charles setup problem.
+
+        Without SSL Proxying Charles records an HTTPS connection as one opaque
+        CONNECT tunnel: no path, no status, no body. Every filter then comes
+        back empty, which reads as "the app sent nothing" unless it is said.
+        """
+        scope = (
+            f"hosts matching `{query.host_contains}`" if query.host_contains else "this capture"
+        )
+        if query.since_seconds is not None:
+            scope += f" in the last {query.since_seconds} s"
+        return (
+            f"ssl_proxying_off: Charles recorded only encrypted CONNECT tunnels ({tunnel_count}) "
+            f"for {scope} and no readable request, so there are no paths or bodies to analyse. "
+            "If the app's requests should be here, enable SSL Proxying for its host in Charles "
+            "(Proxy > SSL Proxying Settings), make sure the device trusts the Charles "
+            "certificate, then repeat the action in the app."
+        )
 
     @staticmethod
     def _started_since(raw_entry: dict, window_start: float) -> bool:

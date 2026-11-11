@@ -96,6 +96,22 @@ def _image_entry(path: str, *, start: datetime) -> dict:
     }
 
 
+def _tunnel_entry(host: str, *, start: datetime) -> dict:
+    """An HTTPS connection Charles could not read: SSL Proxying is off for the host."""
+    return {
+        "status": "COMPLETE",
+        "method": "CONNECT",
+        "scheme": "https",
+        "host": host,
+        "path": None,
+        "query": None,
+        "times": {"start": _iso(start), "end": _iso(start)},
+        "totalSize": 4096,
+        "request": {"header": {"firstLine": f"CONNECT {host}:443 HTTP/1.1", "headers": []}},
+        "response": {"status": 200, "header": {"firstLine": "HTTP/1.1 200 OK", "headers": []}},
+    }
+
+
 def _old_entries(count: int, *, path: str = "/api/old") -> list[dict]:
     """Entries half an hour old, in the start order Charles exports them in."""
     return [
@@ -446,3 +462,53 @@ async def test_discover_variants_filters_before_it_applies_the_limit(env) -> Non
 
     assert [group["path"] for group in variants["groups"]] == ["/pay/confirm"]
     assert variants["warnings"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_capture_of_tunnels_only_says_ssl_proxying_is_off(env) -> None:
+    server, fake_client = env
+    tunnels = [_tunnel_entry("api.example.com", start=NOW - timedelta(seconds=i)) for i in range(3)]
+    capture_id = await _capture(server, fake_client, tunnels)
+
+    result = await _query(server, capture_id)
+
+    assert result["items"] == []
+    hints = [warning for warning in result["warnings"] if warning.startswith("ssl_proxying_off")]
+    assert len(hints) == 1
+    assert "SSL Proxying" in hints[0] and "(3)" in hints[0]
+
+
+@pytest.mark.asyncio
+async def test_the_ssl_proxying_hint_follows_the_host_filter(env) -> None:
+    server, fake_client = env
+    capture_id = await _capture(
+        server,
+        fake_client,
+        [
+            _tunnel_entry("pay.example.com", start=NOW - timedelta(seconds=4)),
+            _api_entry("/api/login", start=NOW - timedelta(seconds=3)),
+        ],
+    )
+
+    whole = await _query(server, capture_id)
+    payments = await _query(server, capture_id, host_contains="pay.example")
+    grouped = _tool_result(
+        await server.call_tool(
+            "group_capture_analysis",
+            {
+                "source": "live",
+                "capture_id": capture_id,
+                "group_by": "path",
+                "host_contains": "pay.example",
+            },
+        )
+    )
+
+    # The capture as a whole has readable traffic, so there is nothing to explain.
+    assert not any(warning.startswith("ssl_proxying_off") for warning in whole["warnings"])
+    # The host the agent asked about has none.
+    for result in (payments, grouped):
+        assert any(
+            warning.startswith("ssl_proxying_off") and "pay.example" in warning
+            for warning in result["warnings"]
+        )
