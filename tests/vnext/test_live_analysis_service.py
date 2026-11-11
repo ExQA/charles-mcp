@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import pytest
@@ -246,3 +247,92 @@ def test_count_non_control_transactions_rejects_dtd_entities():
     with pytest.raises(DefusedXmlException):
         _count_non_control_transactions(malicious_xml)
 
+
+
+def _live_service(tmp_path: Path, snapshots: list[str], **kwargs):
+    config = VNextConfig(state_root=tmp_path / "state")
+    store = SQLiteStore(config.database_path)
+    live_service = LiveAnalysisService(
+        control_service=_FakeControlService(snapshots, recording=True),  # type: ignore[arg-type]
+        ingest_service=IngestService(config, store),
+        query_service=QueryService(store),
+        temp_dir=config.temp_dir,
+        **kwargs,
+    )
+    return config, store, live_service
+
+
+async def _read(live_service, started: dict) -> dict:
+    return await live_service.read(
+        live_session_id=started["live_session_id"],
+        snapshot_format=CaptureSourceFormat.XML,
+        limit=10,
+        advance=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_live_read_leaves_no_session_export_on_disk(tmp_path: Path):
+    """The export is the whole Charles session in plain text; it has no reader after the import."""
+    config, _store, live_service = _live_service(
+        tmp_path, [_build_snapshot("/baseline"), _build_snapshot("/baseline", "/new-1")]
+    )
+    started = await live_service.start(reset_session=False, start_recording_if_stopped=False)
+
+    await _read(live_service, started)
+
+    assert list(config.temp_dir.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_a_live_snapshot_is_dated_so_retention_can_remove_it(tmp_path: Path):
+    """Captures without a date were skipped by every purge and kept for good."""
+    from charles_mcp.services.purge import purge_stored_data
+
+    config, store, live_service = _live_service(
+        tmp_path, [_build_snapshot("/baseline"), _build_snapshot("/baseline", "/new-1")]
+    )
+    started = await live_service.start(reset_session=False, start_recording_if_stopped=False)
+    read = await _read(live_service, started)
+
+    capture = store.get_capture(read["capture_id"])
+    assert capture is not None and capture.started_at is not None
+
+    report = purge_stored_data(
+        package_dir=tmp_path / "package",
+        backup_dir=tmp_path / "backup",
+        reverse_database=config.database_path,
+        older_than_days=30,
+        scopes=("reverse",),
+        dry_run=True,
+        now=time.time() + 60 * 86_400,  # two months from now
+    )
+
+    assert report.reverse_captures == 1
+    assert report.reverse_undated == 0
+
+
+@pytest.mark.asyncio
+async def test_snapshots_beyond_the_history_limit_leave_the_database_too(tmp_path: Path):
+    """Every read stores the whole session again; only the last few may stay."""
+    _config, store, live_service = _live_service(
+        tmp_path,
+        [
+            _build_snapshot("/baseline"),
+            _build_snapshot("/baseline", "/new-1"),
+            _build_snapshot("/baseline", "/new-1", "/new-2"),
+            _build_snapshot("/baseline", "/new-1", "/new-2", "/new-3"),
+        ],
+        snapshot_history_limit=2,
+    )
+    started = await live_service.start(reset_session=False, start_recording_if_stopped=False)
+
+    first = await _read(live_service, started)
+    await _read(live_service, started)
+    last = await _read(live_service, started)
+    stopped = await live_service.stop(live_session_id=started["live_session_id"])
+
+    kept = {capture.capture_id for capture in store.list_captures(limit=50)}
+    assert kept == set(stopped["snapshot_capture_ids"])
+    assert first["capture_id"] not in kept and last["capture_id"] in kept
+    assert store.count_entries(capture_id=first["capture_id"]) == 0

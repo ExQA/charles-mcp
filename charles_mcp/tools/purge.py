@@ -38,6 +38,7 @@ def run_purge(
         "backups": report.backups,
         "reverse_captures": report.reverse_captures,
         "reverse_undated": report.reverse_undated,
+        "reverse_exports": report.reverse_exports,
         "freed_bytes": report.freed_bytes,
     }
 
@@ -53,9 +54,9 @@ def register_purge_tools(mcp: FastMCP, config: Config, reverse_database: Path | 
         """Delete captured data this server stored on disk, older than a cut-off.
 
         Covers saved capture snapshots (`recordings`), the reverse-analysis
-        database with request and response bodies (`reverse`), and Charles
-        config backups with the Web Interface credentials (`backups`). Omit
-        `scopes` for all three.
+        database with request and response bodies and its leftover session
+        exports (`reverse`), and Charles config backups with the Web Interface
+        credentials (`backups`). Omit `scopes` for all three.
 
         `dry_run=true` (the default) only reports what would go; run it first,
         show the user the list, and repeat with `dry_run=false` only after they
