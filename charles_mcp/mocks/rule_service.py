@@ -126,8 +126,9 @@ def merge_patches(
     """Later edits win. A new patch drops any earlier one on the same pointer, and
     any earlier one that may address the same array element by a different mode
     (index vs ``[field=value]``) — otherwise both would apply and could hit
-    different elements once the server reorders the list. Returns the merged
-    patches and the pointers dropped as aliases (for a warning)."""
+    different elements once the server reorders the list. Patches that certainly
+    address different elements (``[id=1]`` and ``[id=2]``) are both kept. Returns
+    the merged patches and the pointers dropped as aliases (for a warning)."""
     kept: list[dict[str, Any]] = []
     aliased: list[str] = []
     for patch in existing:
@@ -456,7 +457,7 @@ class RuleService:
         request_headers: dict[str, str | None] | None = None,
         status: int | None = None,
         delay_ms: int | None = None,
-        priority: int = 0,
+        priority: int | None = None,
         host_scope: Literal["any", "exact"] = "any",
         host: str | None = None,
         match_path: str | None = None,
@@ -464,6 +465,12 @@ class RuleService:
         rule_id: str | None = None,
         description: str | None = None,
     ) -> RuleWriteResult:
+        """Create the rule for one request variant, or extend the one it already has.
+
+        With ``merge`` an existing rule keeps everything this call does not set:
+        whether it is enabled, its priority, its header conditions and response
+        headers. Only ``merge=False`` starts the rule from scratch.
+        """
         entry = await self._entry(source, entry_id, capture_id, recording_path)
         if not entry.host or not entry.path:
             raise ValueError(f"entry `{entry_id}` has no host/path")
@@ -521,9 +528,11 @@ class RuleService:
         request_header_edits = dict(request_headers or {})
         warnings: list[str] = []
         previous: MockRule | None = None
+        same_mode = False
         if merge and self.store.rule_path(rule_host, new_id).is_file():
             previous = self.store.get_rule(rule_host, new_id)
-            if previous.response.mode == mode:
+            same_mode = previous.response.mode == mode
+            if same_mode:
                 response_patches, response_aliased = merge_patches(
                     previous.response.patches, response_patches
                 )
@@ -539,8 +548,10 @@ class RuleService:
                 )
                 for pointer in response_aliased + request_aliased:
                     warnings.append(
-                        f"dropped the previous patch `{pointer}`: a new patch addresses the same "
-                        "array element by a different key, and keeping both could edit the wrong one"
+                        f"dropped the previous patch `{pointer}`: a new patch may address the "
+                        "same array element another way (a position against a [field=value] "
+                        "selector, or selectors on different fields), and keeping both could "
+                        "edit the wrong one"
                     )
             else:
                 warnings.append(f"replaced rule `{new_id}` (mode {previous.response.mode} -> {mode})")
@@ -609,12 +620,37 @@ class RuleService:
                 "nothing goes upstream"
             )
 
+        # An update keeps what this call does not set. Rebuilding the rule from
+        # the arguments alone used to switch a disabled rule back on and reset
+        # its priority, so a rule a scenario had turned off came back by itself.
+        kept: dict[str, Any] = {}
+        match_headers: dict[str, str] = {}
+        if previous is not None:
+            kept = {"enabled": previous.enabled, "created_at": previous.created_at}
+            match_headers = dict(previous.match.headers)
+            if priority is None:
+                priority = previous.priority
+            if same_mode:
+                headers = {**previous.response.headers, **headers}
+            if not previous.enabled:
+                warnings.append(
+                    f"rule `{new_id}` is disabled and stays disabled: the change is stored but "
+                    f"does not apply until mock_rule_set_enabled(host=\"{rule_host}\", "
+                    f"rule_id=\"{new_id}\", enabled=true)"
+                )
+
         rule = MockRule(
             id=new_id,
             host=rule_host,
-            priority=priority,
+            priority=priority or 0,
             description=description or (previous.description if previous else None),
-            match=RuleMatch(method=method, path=path, query=query_match, body=body_match),
+            match=RuleMatch(
+                method=method,
+                path=path,
+                query=query_match,
+                headers=match_headers,
+                body=body_match,
+            ),
             request=RuleRequest(patches=request_patches, headers=request_header_edits),
             response=RuleResponse(
                 mode=mode,
@@ -624,6 +660,7 @@ class RuleService:
                 patches=response_patches,
             ),
             source_entry_id=entry_id,
+            **kept,
         )
         return self._save(rule, fixture, warnings)
 

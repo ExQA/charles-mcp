@@ -140,7 +140,7 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         request_headers: RequestHeaderEdits = None,
         status: int | None = None,
         delay_ms: int | None = None,
-        priority: int = 0,
+        priority: int | None = None,
         host_scope: Literal["any", "exact"] = "any",
         host: str | None = None,
         match_path: str | None = None,
@@ -163,8 +163,10 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         the captured response with any status (e.g. 500), never contacting the server
         (request edits are ignored). status overrides the response code in either mode;
         delay_ms waits that many milliseconds before answering, to test loaders and client
-        timeouts. merge=true adds to the variant's existing rule; a patch on the same
-        pointer replaces the old one. Patches are checked against the captured entry."""
+        timeouts. merge=true adds to the variant's existing rule and keeps what this call
+        does not set (enabled or disabled, priority, header conditions); a patch on the
+        same pointer replaces the old one, and edits of different array elements
+        ([id=1] and [id=2]) are both kept. Patches are checked against the captured entry."""
         return await service.create_rule_from_entry(
             source=source,
             entry_id=entry_id,
