@@ -190,8 +190,15 @@ def register_live_tools(mcp: FastMCP) -> None:
         unless the user explicitly names a saved recording (.chlsj).
         Use this summary path before calling get_traffic_entry_detail.
         Does NOT advance the cursor — safe to call repeatedly with different filters.
-        Default cursor=0 scans all captured data from the beginning.
+        Without a cursor the whole capture is considered; pass the returned
+        next_cursor to look only at entries recorded after this call.
         Use get_traffic_entry_detail to drill down into a specific entry_id.
+
+        The whole capture is examined on every call: since_seconds, host_contains,
+        path_contains, method_in and the preset's noise classes apply first, and
+        scan_limit then caps how many of the remaining entries are analysed,
+        newest first. A `scan_limit_reached` warning means older candidates were
+        left out: narrow the filters or raise scan_limit.
 
         Pass `since_seconds=N` to look only at traffic captured in the last N
         seconds (relative to "now" at query time). This is the preferred

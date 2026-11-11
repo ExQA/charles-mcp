@@ -112,6 +112,26 @@ class TrafficNormalizer:
             response=response_message,
         )
 
+    def entry_id_for(
+        self,
+        raw_entry: dict[str, Any],
+        *,
+        capture_source: CaptureSource,
+        capture_id: str | None = None,
+        recording_path: str | None = None,
+    ) -> str:
+        """The entry_id ``normalize_entry`` would give this raw entry.
+
+        It only hashes routing fields, so a caller looking for one entry can
+        find it without normalizing — and parsing the bodies of — all the others.
+        """
+        return self._build_entry_id(
+            raw_entry,
+            capture_source=capture_source,
+            capture_id=capture_id,
+            recording_path=recording_path,
+        )
+
     def _build_entry_id(
         self,
         raw_entry: dict[str, Any],

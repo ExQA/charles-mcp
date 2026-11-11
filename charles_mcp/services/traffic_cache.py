@@ -58,6 +58,31 @@ class TrafficEntryCache:
             self._entry_index[(source, entry_id)] = identity
         self._evict_overflow()
 
+    def add_entry(
+        self,
+        *,
+        source: str,
+        identity: str,
+        body_mode: str,
+        entry: TrafficEntry,
+    ) -> None:
+        """Add one entry to a scope, keeping what the scope already holds.
+
+        ``put`` replaces a scope, which is right for a fresh query result but
+        would throw away the summaries of the last query when a single entry is
+        looked up on its own.
+        """
+        self._evict_expired()
+        key = TrafficCacheKey(source=source, identity=identity, body_mode=body_mode)
+        scope = self._scopes.get(key)
+        if scope is None:
+            scope = TrafficCacheScope(entries={})
+            self._scopes[key] = scope
+        scope.entries[entry.entry_id] = entry
+        self._scopes.move_to_end(key)
+        self._entry_index[(source, entry.entry_id)] = identity
+        self._evict_overflow()
+
     def get_entry(
         self,
         *,

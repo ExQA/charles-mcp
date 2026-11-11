@@ -69,7 +69,8 @@ from charles_mcp.schemas.mocks import (
     VariantDiscoveryResult,
     VariantGroup,
 )
-from charles_mcp.schemas.traffic import CaptureSource, TrafficEntry
+from charles_mcp.schemas.traffic import CaptureSource, ResourceClassification, TrafficEntry
+from charles_mcp.services.traffic_query_orchestrator import READ_ALL, keep_newest
 from charles_mcp.services.traffic_query_service import TrafficQueryService
 
 _MAX_BODY_CHARS = 5_000_000
@@ -318,21 +319,24 @@ class RuleService:
         source: CaptureSource,
         capture_id: str | None,
         recording_path: str | None,
-        limit: int,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """One export of the capture (or one read of the recording); never paged."""
+        """Every entry of the capture (or recording), from one export; never paged.
+
+        The caller decides which entries to keep: cutting here would keep the
+        oldest ones, and the flow the user has just run is at the other end.
+        """
         if source == "live":
             if not capture_id:
                 raise ValueError("capture_id is required for source='live'")
             read = await self.traffic_query_service.live_service.read(
-                capture_id, cursor=0, limit=limit, advance=False
+                capture_id, cursor=0, limit=READ_ALL, advance=False
             )
             return list(read.items), None
         history = self.traffic_query_service.history_service
         if recording_path:
             return await history.get_snapshot(recording_path), recording_path
         path, raw = await history.load_latest_with_path()
-        return raw[:limit], path
+        return raw, path
 
     async def discover_variants(
         self,
@@ -344,7 +348,7 @@ class RuleService:
         path_contains: str | None = None,
         body_field: str = "/action",
         methods: list[str] | None = None,
-        limit: int = 5000,
+        limit: int = 2000,
         max_groups: int = 200,
     ) -> VariantDiscoveryResult:
         """Group captured API requests by method, host, path and a body field value.
@@ -352,7 +356,9 @@ class RuleService:
         Reads the capture once and parses full request bodies, so long sessions cost
         one Charles export instead of one per page or per truncated preview.
         """
-        raw_entries, identity = await self._raw_entries(source, capture_id, recording_path, limit)
+        if limit <= 0:
+            raise ValueError("limit must be greater than 0")
+        raw_entries, identity = await self._raw_entries(source, capture_id, recording_path)
         result = VariantDiscoveryResult(
             host_contains=host_contains,
             path_contains=path_contains,
@@ -364,7 +370,14 @@ class RuleService:
         host_filter = (host_contains or "").lower()
         groups: dict[tuple[str, str, str, str], VariantGroup] = {}
         normalizer = self.traffic_query_service.normalizer
-        for raw in raw_entries[:limit]:
+        # Cheap pass over the whole capture first: noise classes and the
+        # method/host/path filters need only routing fields. The limit then
+        # applies to what is left, newest first, so a long session cannot push
+        # the flow the user has just run out of the overview.
+        wanted: list[tuple[dict[str, Any], ResourceClassification, str, str, str]] = []
+        for raw in raw_entries:
+            if not isinstance(raw, dict):
+                continue
             classification = classify_entry(raw)
             if classification.resource_class in _NOISE_CLASSES:
                 continue
@@ -377,6 +390,14 @@ class RuleService:
                 or (path_contains and path_contains not in path)
             ):
                 continue
+            wanted.append((raw, classification, method, host, path))
+        if len(wanted) > limit:
+            result.warnings.append(
+                f"only the newest {limit} of {len(wanted)} matching entries read; narrow with "
+                "host_contains/path_contains/methods or raise limit"
+            )
+            wanted = keep_newest(wanted, limit, raw_of=lambda item: item[0])
+        for raw, classification, method, host, path in wanted:
             entry = normalizer.normalize_entry(
                 raw,
                 capture_source=source,
@@ -408,8 +429,6 @@ class RuleService:
                 group.entry_ids.append(entry.entry_id)
             if entry.response_status and entry.response_status not in group.response_statuses:
                 group.response_statuses.append(entry.response_status)
-        if len(raw_entries) > limit:
-            result.warnings.append(f"only the first {limit} of {len(raw_entries)} entries read")
         ordered = sorted(groups.values(), key=lambda g: (g.host, g.path, g.method, g.value_json))
         result.total_groups = len(ordered)
         if len(ordered) > max_groups:

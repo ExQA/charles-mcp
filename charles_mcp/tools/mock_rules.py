@@ -111,7 +111,9 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         path and the value of a request-body field (default /action; "null" for GETs
         and bodies without it), with counts, sample entry_ids and response statuses.
         Use it right after reading a session so the user can name what to change.
-        Filter with host_contains / path_contains / methods. live needs capture_id."""
+        Filter with host_contains / path_contains / methods. live needs capture_id.
+        The filters apply to the whole session; limit then caps how many matching
+        entries are read, newest first, and a warning says when older ones were left out."""
         return await service.discover_variants(
             source=source,
             capture_id=capture_id,
