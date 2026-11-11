@@ -140,9 +140,16 @@ class TrafficNormalizer:
         capture_id: str | None,
         recording_path: str | None,
     ) -> str:
-        """Build a lightweight fingerprint from key routing fields."""
+        """Build a lightweight fingerprint from the fields that identify a request.
+
+        Only what stays the same while Charles records the request goes in:
+        where it went, when it started and which client connection it came
+        from. Status, sizes and the response are left out on purpose — with
+        them the id of a request listed while it was still in flight changed
+        the moment it completed, and the id an agent had just been given no
+        longer found anything.
+        """
         times = raw_entry.get("times") or {}
-        response = raw_entry.get("response") or {}
         components = [
             capture_source,
             capture_id or "",
@@ -151,10 +158,8 @@ class TrafficNormalizer:
             str(raw_entry.get("method") or ""),
             str(raw_entry.get("path") or ""),
             str(raw_entry.get("query") or ""),
-            str(raw_entry.get("status") or ""),
-            str(response.get("status") or ""),
             str(times.get("start") or ""),
-            str(times.get("end") or ""),
-            str(raw_entry.get("totalSize") or ""),
+            str(raw_entry.get("clientAddress") or ""),
+            str(raw_entry.get("clientPort") or ""),
         ]
         return sha1("|".join(components).encode("utf-8")).hexdigest()

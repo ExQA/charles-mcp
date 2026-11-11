@@ -105,7 +105,9 @@ def register_live_tools(mcp: FastMCP) -> None:
         Returns compact entry summaries (host/method/path/status only).
         This read call consumes the current increment.
         Use query_live_capture_entries for structured filtering instead of this tool.
-        This tool advances the internal cursor — repeated calls only return new items."""
+        This tool advances the internal cursor — repeated calls only return new items.
+        A request returned while still in flight is returned once more when it has
+        finished, with its response status."""
         deps = get_tool_dependencies(ctx)
         try:
             result = await deps.live_service.read(

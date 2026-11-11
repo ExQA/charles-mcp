@@ -9,6 +9,7 @@ from hashlib import sha1
 from typing import TypeVar, cast
 
 from charles_mcp.analyzers.resource_classifier import classify_entry
+from charles_mcp.live_state import is_final_status
 from charles_mcp.schemas.analysis import TrafficDetailResult, TrafficQueryResult
 from charles_mcp.schemas.traffic import (
     CaptureSource,
@@ -290,6 +291,10 @@ class TrafficQueryOrchestrator:
             entry_id=entry_id,
             body_mode=body_mode,
         )
+        if entry is not None and not is_final_status(entry.status):
+            # Cached while the request was still in flight: its response may
+            # have arrived since, so look again instead of serving half of it.
+            entry = None
 
         if entry is None:
             entry = await self._hydrate_and_cache_entry(
@@ -339,32 +344,44 @@ class TrafficQueryOrchestrator:
         capture_id: str | None
         recording_path: str | None
         if source == "history":
-            raw_entries = await self.history_service.get_snapshot(identity)
             capture_id = None
             recording_path = identity
-        else:
-            live_result = await self.live_service.read(
-                identity,
-                cursor=0,
-                limit=READ_ALL,
-                advance=False,
-            )
-            raw_entries = live_result.items
-            capture_id = identity
-            recording_path = None
-
-        for raw in raw_entries:
-            if not isinstance(raw, dict):
-                continue
-            candidate_id = self.normalizer.entry_id_for(
-                raw,
-                capture_source=source,
+            raw = self._find_raw_entry(
+                await self.history_service.get_snapshot(identity),
+                source=source,
                 capture_id=capture_id,
                 recording_path=recording_path,
+                entry_id=entry_id,
             )
-            if candidate_id != entry_id:
-                continue
+        else:
+            capture_id = identity
+            recording_path = None
+            # A finished request does not change any more, so the copy from the
+            # last export is as good as a new one — and a new one costs a whole
+            # session export, tens of seconds on a long session.
+            raw = self._find_raw_entry(
+                self._known_live_entries(identity),
+                source=source,
+                capture_id=capture_id,
+                recording_path=recording_path,
+                entry_id=entry_id,
+            )
+            if raw is None or not is_final_status(raw.get("status")):
+                live_result = await self.live_service.read(
+                    identity,
+                    cursor=0,
+                    limit=READ_ALL,
+                    advance=False,
+                )
+                raw = self._find_raw_entry(
+                    live_result.items,
+                    source=source,
+                    capture_id=capture_id,
+                    recording_path=recording_path,
+                    entry_id=entry_id,
+                )
 
+        if raw is not None:
             classification = classify_entry(raw)
             if include_full_body:
                 hydrated = self.normalizer.normalize_entry(
@@ -402,6 +419,39 @@ class TrafficQueryOrchestrator:
                 )
             return hydrated
 
+        return None
+
+    def _known_live_entries(self, capture_id: str) -> list[dict]:
+        """What the live service already holds for the capture; empty if it cannot say."""
+        known = getattr(self.live_service, "known_entries", None)
+        if known is None:
+            return []
+        try:
+            return list(known(capture_id))
+        except Exception:
+            # An unknown capture is reported by the read that follows, with its own error.
+            return []
+
+    def _find_raw_entry(
+        self,
+        raw_entries: list[dict],
+        *,
+        source: CaptureSource,
+        capture_id: str | None,
+        recording_path: str | None,
+        entry_id: str,
+    ) -> dict | None:
+        for raw in raw_entries:
+            if not isinstance(raw, dict):
+                continue
+            candidate_id = self.normalizer.entry_id_for(
+                raw,
+                capture_source=source,
+                capture_id=capture_id,
+                recording_path=recording_path,
+            )
+            if candidate_id == entry_id:
+                return raw
         return None
 
     async def _load_history_entries(self, recording_path: str | None) -> tuple[str, list[dict]]:

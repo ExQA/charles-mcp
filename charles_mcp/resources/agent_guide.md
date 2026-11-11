@@ -26,7 +26,7 @@ Everything an agent needs to use this MCP server correctly: the operating model,
 
 1. `charles_status` — Charles reachable? Web Interface credentials right? Active capture? Follow its `recommended_next_action`.
 2. HTTPS: Charles must have **SSL Proxying** enabled for the API hosts and the device must trust the Charles certificate. Without it Charles only sees a tunnel, the path is unknown, and path-based rules never fire.
-3. Session size: if exports are slow, suggest clearing the session before the scenario and, when only a phone is tested, turning off Proxy → macOS Proxy in Charles.
+3. Session size: if exports are slow, suggest clearing the session before the scenario and, when only a phone is tested, turning off Proxy → macOS Proxy in Charles. A `slow_export` warning gives the measured time; every call that reads traffic pays it again. Detail of a finished request (`get_traffic_entry_detail`, creating a mock from it) is served from the last export and costs nothing extra.
 4. A `charles_records_own_exports` warning means Charles is recording this server's own session exports, and the session will grow on every call. Relay the fix to the user rather than carrying on: exclude host `control.charles` — by hand in Proxy → Recording Settings, or with `charles_recording_exclude(apply=true)` once they have quit Charles — then clear the session, which is theirs to do.
 
 ## 4. Identities
@@ -50,7 +50,7 @@ Keep identities between calls and never mix them across planes.
 |---|---|---|
 | `start_live_capture(reset_session=false, adopt_existing=true, start_recording_if_stopped=true)` | Begin reading the current session | **The capture always includes the traffic recorded before the call**; there is no option to hide it. The first `read_live_capture` returns the existing entries, later reads only new ones. Only one capture can be active |
 | `query_live_capture_entries(capture_id, ...)` | Structured, filtered summaries | Read-only, does not move the cursor. Filters: `host_contains`, `path_contains`, `method_in`, `status_in`, header name/value, content types, `request_body_contains` / `response_body_contains`, `request_json_query` / `response_json_query` (JMESPath), size, `since_seconds`. The whole capture is examined on every call: `since_seconds`, `host_contains`, `path_contains`, `method_in` and the preset's noise classes apply first, then `scan_limit` (default 500) caps how many of the remaining entries are analysed, newest first. A `scan_limit_reached` warning means older candidates were left out — narrow the filters or raise `scan_limit`. `max_items` (default 10) only limits how many summaries come back |
-| `read_live_capture(capture_id, cursor, limit)` | Consume new entries (route-level only) | Advances the cursor |
+| `read_live_capture(capture_id, cursor, limit)` | Consume new entries (route-level only) | Advances the cursor. A request returned while still in flight comes once more when it has finished, with its status; an `entry_id` stays the same before and after |
 | `peek_live_capture(capture_id, cursor, limit)` | Preview new entries | Does not advance |
 | `stop_live_capture(capture_id, persist=true)` | End the capture | `persist=true` saves a `.chlsj` snapshot to the state dir. `status="stop_failed"` with `recoverable=true` means the capture is still alive — call again |
 
