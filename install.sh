@@ -75,4 +75,7 @@ Charles Web Interface login and password:
 
 Kiro reads .kiro/settings/mcp.json in the project, or ~/.kiro/settings/mcp.json.
 Charles must be running with Proxy -> Web Interface Settings enabled.
+In Charles also add host control.charles to Proxy -> Recording Settings -> Exclude:
+without it Charles records this server's own session exports and the session grows
+on every tool call.
 CONFIG
