@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from mcp.server.fastmcp import FastMCP
 
 from charles_mcp.schemas.analysis import TrafficQueryResult
@@ -11,48 +9,17 @@ from charles_mcp.schemas.live_capture import (
     StopLiveCaptureResult,
 )
 from charles_mcp.schemas.traffic_query import TrafficPreset
-from charles_mcp.tools.tool_contract import ToolContext, build_traffic_query, get_tool_dependencies
-
-_ENTRY_SUMMARY_KEYS = (
-    "method", "scheme", "host", "path", "query", "status",
-    "totalSize", "errorMessage",
+from charles_mcp.tools.tool_contract import (
+    ToolContext,
+    build_traffic_query,
+    get_tool_dependencies,
+    summarize_raw_entry,
 )
-_MAX_BODY_PREVIEW_CHARS = 256
-
-
-def _summarize_raw_entry(entry: dict[str, Any]) -> dict[str, Any]:
-    """Compact a raw Charles entry to routing fields only, preventing context explosion."""
-    summary: dict[str, Any] = {}
-    for key in _ENTRY_SUMMARY_KEYS:
-        value = entry.get(key)
-        if value is not None:
-            summary[key] = value
-
-    response = entry.get("response")
-    if isinstance(response, dict):
-        resp_status = response.get("status")
-        if resp_status is not None:
-            summary["response_status"] = resp_status
-        resp_mime = response.get("mimeType")
-        if resp_mime:
-            summary["response_content_type"] = resp_mime
-
-    request = entry.get("request")
-    if isinstance(request, dict):
-        req_mime = request.get("mimeType")
-        if req_mime:
-            summary["request_content_type"] = req_mime
-
-    times = entry.get("times")
-    if isinstance(times, dict) and times.get("start"):
-        summary["start_time"] = times["start"]
-
-    return summary
 
 
 def _compact_read_result(result: LiveCaptureReadResult) -> LiveCaptureReadResult:
     """Replace raw items with compact summaries to avoid token explosion."""
-    compacted = [_summarize_raw_entry(item) for item in result.items if isinstance(item, dict)]
+    compacted = [summarize_raw_entry(item) for item in result.items if isinstance(item, dict)]
     return result.model_copy(update={"items": compacted})
 
 

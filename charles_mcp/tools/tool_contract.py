@@ -113,6 +113,62 @@ ThrottlingPreset = Annotated[
 ]
 
 
+_ENTRY_SUMMARY_KEYS = (
+    "method", "scheme", "host", "path", "query", "status",
+    "totalSize", "errorMessage",
+)
+MAX_BODY_PREVIEW_CHARS = 256
+
+
+def summarize_raw_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Compact a raw Charles entry to routing fields only, preventing context explosion."""
+    summary: dict[str, Any] = {}
+    for key in _ENTRY_SUMMARY_KEYS:
+        value = entry.get(key)
+        if value is not None:
+            summary[key] = value
+
+    response = entry.get("response")
+    if isinstance(response, dict):
+        resp_status = response.get("status")
+        if resp_status is not None:
+            summary["response_status"] = resp_status
+        resp_mime = response.get("mimeType")
+        if resp_mime:
+            summary["response_content_type"] = resp_mime
+
+    request = entry.get("request")
+    if isinstance(request, dict):
+        req_mime = request.get("mimeType")
+        if req_mime:
+            summary["request_content_type"] = req_mime
+
+    times = entry.get("times")
+    if isinstance(times, dict) and times.get("start"):
+        summary["start_time"] = times["start"]
+
+    return summary
+
+
+def raw_body_preview(message: Any, max_chars: int = MAX_BODY_PREVIEW_CHARS) -> tuple[str | None, bool]:
+    """The first characters of a raw Charles body, and whether it was cut.
+
+    A body Charles stored as base64 is binary or compressed: its text would be
+    noise, so it is named instead of shown.
+    """
+    body = message.get("body") if isinstance(message, dict) else None
+    if not isinstance(body, dict):
+        return None, False
+    text = body.get("text")
+    if not isinstance(text, str) or not text:
+        return None, False
+    if body.get("encoded"):
+        return "[binary body omitted]", False
+    if len(text) <= max_chars:
+        return text, False
+    return text[:max_chars], True
+
+
 def build_tool_guidance_error(
     *,
     parameter: str,

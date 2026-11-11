@@ -333,7 +333,7 @@ This README documents the whole public tool surface.
 | Tool | What it does | Typical use |
 | --- | --- | --- |
 | `list_recordings` | Lists saved recording files | Before choosing a historical snapshot |
-| `get_recording_snapshot` | Loads the raw content of one saved recording | When you need the stored snapshot itself |
+| `get_recording_snapshot` | Lists one saved recording as compact summaries, a page at a time, without bodies | When you need to see what a stored snapshot holds |
 | `query_recorded_traffic` | Applies lightweight filtering to the latest saved recording | When you need a quick host, method, or regex query |
 
 ### Status and control tools

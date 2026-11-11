@@ -64,7 +64,7 @@ Keep identities between calls and never mix them across planes.
 
 ### 5.3 Saved recordings (only when the user mentions a saved file)
 
-`list_recordings`, `get_recording_snapshot(path)`, `analyze_recorded_traffic(recording_path, ...)`, `query_recorded_traffic(host_contains, http_method, keyword_regex)`.
+`list_recordings`, `get_recording_snapshot(path, offset, limit)`, `analyze_recorded_traffic(recording_path, ...)`, `query_recorded_traffic(host_contains, http_method, keyword_regex, max_items)`. The snapshot and query tools return compact summaries with an `entry_id` (the query adds 256-character body previews), never whole bodies; open one entry with `get_traffic_entry_detail(source="history", recording_path, entry_id)`.
 
 ### 5.4 Status and control
 

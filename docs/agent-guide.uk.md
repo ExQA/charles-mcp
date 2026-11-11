@@ -66,7 +66,7 @@
 
 ### 5.3 Збережені записи (лише якщо користувач згадав файл)
 
-`list_recordings`, `get_recording_snapshot(path)`, `analyze_recorded_traffic(recording_path, ...)`, `query_recorded_traffic(host_contains, http_method, keyword_regex)`.
+`list_recordings`, `get_recording_snapshot(path, offset, limit)`, `analyze_recorded_traffic(recording_path, ...)`, `query_recorded_traffic(host_contains, http_method, keyword_regex, max_items)`. Інструменти snapshot і query повертають короткі зведення з `entry_id` (query додає прев'ю тіл по 256 символів), але ніколи не цілі тіла; один запис відкривайте через `get_traffic_entry_detail(source="history", recording_path, entry_id)`.
 
 ### 5.4 Стан і керування
 
