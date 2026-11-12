@@ -238,7 +238,7 @@ wheels = [
 
 [[package]]
 name = "charles-mcp"
-version = "3.1.0rc1"
+version = "3.1.0rc2"
 source = { editable = "." }
 dependencies = [
     { name = "brotli" },

@@ -3,7 +3,7 @@
 What changed for someone who uses the server or its tools. Changes in behaviour come
 first: they are the ones a client or an agent can trip over.
 
-## Unreleased
+## 3.1.0rc2 — 2026-11-12
 
 Since `3.1.0rc1`.
 
