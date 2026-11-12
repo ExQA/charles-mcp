@@ -42,16 +42,27 @@ def _port_open(port: int) -> bool:
 
 @pytest.fixture
 def stand_in_charles():
-    """A proxy that answers every Web Interface page and remembers what it was asked."""
+    """A proxy with a Map Remote switch that remembers what it was asked.
+
+    The switch starts off, like a Charles nobody has touched: the server only
+    switches off on exit what it found off and switched on itself.
+    """
     asked: list[str] = []
+    state = {"enabled": False}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None:  # noqa: A002
             return
 
         def do_GET(self) -> None:  # noqa: N802
-            asked.append(self.path.replace("http://control.charles", ""))
-            body = b"<html>Map Remote Status: Enabled</html>"
+            page = self.path.replace("http://control.charles", "")
+            asked.append(page)
+            if page.endswith("/enable"):
+                state["enabled"] = True
+            elif page.endswith("/disable"):
+                state["enabled"] = False
+            status = "Enabled" if state["enabled"] else "Disabled"
+            body = f"<html>Map Remote Status: {status}</html>".encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -130,7 +141,8 @@ def test_the_process_switches_map_remote_off_when_it_ends(
         })
         reply(2)
         assert _port_open(dispatcher_port)
-        assert asked == ["/tools/map-remote/enable"]
+        # It looks at the switch first, then turns it on.
+        assert asked == ["/tools/map-remote/", "/tools/map-remote/enable"]
 
         if ending == "stdin-closed":
             assert process.stdin is not None
@@ -143,7 +155,8 @@ def test_the_process_switches_map_remote_off_when_it_ends(
             process.kill()
             process.wait(timeout=5)
 
-    assert asked == ["/tools/map-remote/enable", "/tools/map-remote/disable"]
+    assert asked[-1] == "/tools/map-remote/disable"
+    assert asked.count("/tools/map-remote/disable") == 1
     assert not _port_open(dispatcher_port)
     # A clean exit when the client hangs up; death by the signal it was sent otherwise.
     assert exit_code == (0 if ending == "stdin-closed" else -signal.SIGTERM)

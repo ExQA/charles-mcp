@@ -135,6 +135,72 @@ async def test_closing_the_server_leaves_a_map_remote_it_did_not_switch_on(env) 
 
 
 @pytest.mark.asyncio
+async def test_a_map_remote_that_was_already_on_is_left_on(env) -> None:
+    """Map Remote is one switch for all of Charles: it may be on for the user's own mappings."""
+    server, fake_client, config = env
+    fake_client.map_remote_enabled = True
+    messages: list[str] = []
+
+    async def session() -> None:
+        started = _tool_result(await server.call_tool("mock_dispatcher", {"action": "start"}))
+        messages.append(started["message"])
+
+    await _run_and_close(server, session)
+
+    assert fake_client.tool_calls == ["map-remote:on"]  # nothing switched it off
+    assert fake_client.map_remote_enabled is True
+    assert "already on" in messages[0] and "leaves it on" in messages[0]
+    assert not _port_open(config.dispatcher_port)
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_switch_is_not_taken_for_ours(env) -> None:
+    server, fake_client, _ = env
+    fake_client.map_remote_enabled = None  # Charles does not say
+    messages: list[str] = []
+
+    async def session() -> None:
+        started = _tool_result(await server.call_tool("mock_dispatcher", {"action": "start"}))
+        messages.append(started["message"])
+
+    await _run_and_close(server, session)
+
+    assert fake_client.tool_calls == ["map-remote:on"]
+    assert "could not be read" in messages[0]
+
+
+@pytest.mark.asyncio
+async def test_two_servers_do_not_switch_map_remote_off_under_each_other(
+    env, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With two MCP clients open, only the server that switched Map Remote on switches it off."""
+    first, fake_client, config = env
+    other_config = Config(mock_dir=str(tmp_path / "mocks"))
+    other_config.config_path = None
+    other_config.backup_dir = str(tmp_path / "backup-2")
+    other_config.state_dir = str(tmp_path / "state-2")
+    other_config.package_dir = str(tmp_path / "package-2")
+    other_config.dispatcher_port = config.dispatcher_port
+    second = create_server(config=other_config)
+
+    async with first.settings.lifespan(first):
+        await first.call_tool("mock_dispatcher", {"action": "start"})
+
+        async def second_session() -> None:
+            # Finds the first server's dispatcher on the port and Map Remote already on.
+            await second.call_tool("mock_dispatcher", {"action": "start"})
+
+        await _run_and_close(second, second_session)
+
+        # The second server is gone; the first one is still serving.
+        assert fake_client.map_remote_enabled is True
+        assert _port_open(config.dispatcher_port)
+
+    assert fake_client.map_remote_enabled is False
+    assert fake_client.tool_calls == ["map-remote:on", "map-remote:on", "map-remote:off"]
+
+
+@pytest.mark.asyncio
 async def test_a_charles_that_is_gone_does_not_break_the_shutdown(env) -> None:
     server, fake_client, _ = env
 
@@ -175,6 +241,9 @@ async def test_status_names_map_remote_left_on_without_a_dispatcher(env) -> None
     assert warning.startswith("map_remote_without_dispatcher")
     assert "*.example.com/api/*" in warning and str(config.dispatcher_port) in warning
     assert 'mock_dispatcher(action="stop")' in warning
+    # It says which port it looked at, where that port is set, and what stop costs.
+    assert "CHARLES_DISPATCHER_PORT" in warning and "Only this port is checked" in warning
+    assert "the user's own included" in warning
     assert dispatcher["message"] == warning
 
 
