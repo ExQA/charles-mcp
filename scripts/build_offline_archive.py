@@ -39,9 +39,9 @@ from datetime import date
 from pathlib import Path
 
 # Interpreters and platforms the team actually runs. Binary wheels
-# (pydantic-core, brotli, zstandard, cffi) are built per version and per
+# (pydantic-core, brotli, zstandard before 3.14, cffi) are built per version and per
 # architecture; pure-Python ones are shared, so extra sets cost little.
-DEFAULT_PYTHON_VERSIONS = ("3.12", "3.13", "3.14")
+DEFAULT_PYTHON_VERSIONS = ("3.12", "3.13", "3.14", "3.15")
 # Apple Silicon only: the team has no Intel Macs, and since cryptography 50
 # there are no Intel macOS wheels for it at all, so an x86_64 set cannot be
 # built without pinning a cryptography release that has open advisories.
@@ -119,15 +119,88 @@ def export_requirements(target: Path) -> int:
     return len(names)
 
 
+def target_environment(python_version: str, platform: str) -> dict[str, str]:
+    """Marker values for the interpreter and platform a wheel set is built for.
+
+    Only what a pip platform tag and a Python version say is set; everything
+    else (the implementation, for one) is taken from the running interpreter,
+    which is CPython like the targets.
+    """
+    environment = {
+        "python_version": python_version,
+        "python_full_version": f"{python_version}.0",
+    }
+    if platform.startswith("macosx"):
+        environment.update(sys_platform="darwin", platform_system="Darwin", os_name="posix")
+    elif platform.startswith(("manylinux", "musllinux", "linux")):
+        environment.update(sys_platform="linux", platform_system="Linux", os_name="posix")
+    elif platform.startswith("win"):
+        environment.update(sys_platform="win32", platform_system="Windows", os_name="nt")
+    for machine in ("arm64", "aarch64", "x86_64", "amd64"):
+        if platform.endswith(machine):
+            environment["platform_machine"] = machine
+            break
+    return environment
+
+
+def requirements_for_target(exported: str, python_version: str, platform: str) -> str:
+    """The exported closure with every environment marker decided for one target.
+
+    pip download --python-version and --platform change which wheel files fit,
+    but pip still evaluates markers such as ``python_full_version < '3.14'``
+    against the interpreter that runs it. Built on Python 3.15, an archive for
+    3.12 then left out every package needed only before 3.14 and failed to
+    install there. So each target gets its own file: requirements whose marker
+    is false for it are dropped, and the rest lose the marker pip would misread.
+    Hashes are kept as they are.
+    """
+    from packaging.markers import Marker
+
+    environment = target_environment(python_version, platform)
+    kept: list[str] = []
+    block: list[str] = []
+
+    def flush() -> None:
+        if not block:
+            return
+        head, rest = block[0], block[1:]
+        requirement, separator, marker = head.partition(" ; ")
+        if separator:
+            marker_text = marker.rstrip(" \\")
+            if not Marker(marker_text).evaluate(environment):
+                block.clear()
+                return
+            head = requirement + (" \\" if head.rstrip().endswith("\\") else "")
+        kept.extend([head, *rest])
+        block.clear()
+
+    for line in exported.splitlines():
+        if line.startswith((" ", "\t")) and block:
+            block.append(line)
+            continue
+        flush()
+        if line and not line.startswith("#") and "==" in line:
+            block.append(line)
+        else:
+            kept.append(line)
+    flush()
+    return "\n".join(kept) + "\n"
+
+
 def download_wheels(
     requirements: Path, wheel_dir: Path, python_versions: list[str], platforms: list[str]
 ) -> None:
     """Fill the wheelhouse for every requested interpreter and platform."""
     wheel_dir.mkdir(parents=True, exist_ok=True)
     downloader = pip_python()
+    exported = requirements.read_text(encoding="utf-8")
     for version in python_versions:
         for platform in platforms:
             print(f"  wheels for Python {version} on {platform}")
+            target_requirements = wheel_dir.parent / f".requirements-{version}-{platform}.txt"
+            target_requirements.write_text(
+                requirements_for_target(exported, version, platform), encoding="utf-8"
+            )
             run(
                 [
                     downloader,
@@ -136,7 +209,7 @@ def download_wheels(
                     "download",
                     "--quiet",
                     "--requirement",
-                    str(requirements),
+                    str(target_requirements),
                     "--dest",
                     str(wheel_dir),
                     # The requirements file is a full closure, so resolving
@@ -151,6 +224,9 @@ def download_wheels(
                     platform,
                 ]
             )
+            # Build-time only: the archive ships the full file, and pip on the
+            # installing machine evaluates its markers correctly.
+            target_requirements.unlink()
 
 
 def build_project_wheel(source: Path, wheel_dir: Path) -> str:

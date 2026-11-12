@@ -151,6 +151,6 @@ wheelhouse cannot.
        `docs/team-installation.md` and its Ukrainian translation.
 3. [x] Add the rebuild step to the release checklist.
 4. [x] Confirm what the team runs: Apple Silicon only, so the default set is
-       arm64 for Python 3.12-3.14. Intel was dropped when cryptography 50
+       arm64 for Python 3.12-3.15. Intel was dropped when cryptography 50
        stopped publishing Intel macOS wheels; supporting it again would mean
        pinning an older cryptography with open advisories.

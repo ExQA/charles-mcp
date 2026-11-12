@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "charles-mcp"
-version = "3.1.0rc1"
+version = "3.1.0rc2"
 description = "Charles Proxy MCP server with live capture, structured traffic analysis, and agent-friendly tool contracts"
 readme = {file = "README.en.md", content-type = "text/markdown"}
 license = "MIT"
@@ -30,7 +30,7 @@ dependencies = [
     "jmespath>=1.0.1",
     "defusedxml>=0.7.1",
     "brotli>=1.1.0",
-    "zstandard>=0.23.0",
+    "zstandard>=0.23.0; python_version < \"3.14\"",
     "protobuf>=5.0.0",
     "typing_extensions>=4.0.0; python_version < \"3.11\"",
 ]

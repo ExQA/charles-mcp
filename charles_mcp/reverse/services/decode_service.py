@@ -4,17 +4,32 @@ from __future__ import annotations
 
 import gzip
 import json
+import sys
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs
 
 import brotli
-import zstandard
 from google.protobuf import descriptor_pb2, descriptor_pool, json_format, message_factory
 
 from charles_mcp.reverse.models import ArtifactType, DecodedArtifact
 from charles_mcp.reverse.services.common import new_identifier
 from charles_mcp.reverse.storage import SQLiteStore
+
+# Python 3.14 has zstd in the standard library. The zstandard package is only
+# needed before that, and it publishes no wheels for 3.15, so depending on it
+# everywhere would keep the offline archive off the current Homebrew Python.
+if sys.version_info >= (3, 14):
+    from compression import zstd as _stdlib_zstd
+
+    def zstd_decompress(payload: bytes) -> bytes:
+        return _stdlib_zstd.decompress(payload)
+
+else:
+    import zstandard
+
+    def zstd_decompress(payload: bytes) -> bytes:
+        return zstandard.ZstdDecompressor().decompress(payload)
 
 
 class DecodeService:
@@ -204,7 +219,7 @@ def _try_decompress_brotli(payload: bytes) -> tuple[bytes, str | None]:
 
 def _try_decompress_zstd(payload: bytes) -> tuple[bytes, str | None]:
     try:
-        return zstandard.ZstdDecompressor().decompress(payload), None
+        return zstd_decompress(payload), None
     except Exception:
         return payload, "zstd_header_present_but_payload_not_compressed"
 

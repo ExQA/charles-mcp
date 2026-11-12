@@ -1,6 +1,6 @@
 # Charles MCP Server
 
-[![Version](https://img.shields.io/badge/version-3.1.0rc1-0e7c76.svg)](docs/team-installation.md)
+[![Version](https://img.shields.io/badge/version-3.1.0rc2-0e7c76.svg)](docs/team-installation.md)
 [![License](https://img.shields.io/badge/license-MIT-0e7c76.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-0e7c76.svg)](pyproject.toml)
 [![Install](https://img.shields.io/badge/install-from%20the%20archive%2C%20not%20PyPI-c75300.svg)](docs/team-installation.md)
