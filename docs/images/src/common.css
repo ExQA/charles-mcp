@@ -1,0 +1,26 @@
+:root{
+  --bg:#0b1220; --panel:#111a2e; --panel2:#16213a; --line:#2a3a5c;
+  --ink:#e8eef9; --ink2:#a9b6cf; --muted:#71809e;
+  --teal:#19b3a6; --teal-d:#0e7c76; --amber:#f2a93b; --red:#ef5b5b; --blue:#5b9cff; --violet:#a78bfa; --green:#3ccf7e;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1600px;height:900px;overflow:hidden}
+body{background:radial-gradient(1200px 700px at 85% -10%,#15325a 0%,transparent 60%),radial-gradient(900px 600px at -10% 110%,#0f3a3a 0%,transparent 55%),var(--bg);
+  color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",Arial,sans-serif;position:relative}
+.mono{font-family:"SF Mono",Menlo,Monaco,monospace}
+.title{position:absolute;left:72px;top:56px}
+.title h1{font-size:46px;font-weight:750;letter-spacing:-.5px}
+.title h1 b{color:var(--teal)}
+.title p{font-size:22px;color:var(--ink2);margin-top:8px}
+.card{position:absolute;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1.5px solid var(--line);border-radius:22px;padding:22px 24px;box-shadow:0 18px 40px rgba(0,0,0,.35)}
+.card h3{font-size:24px;font-weight:700;display:flex;align-items:center;gap:12px}
+.card .sub{font-size:16px;color:var(--ink2);margin-top:6px;line-height:1.45}
+.icon{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-size:24px;flex:none}
+.pill{display:inline-block;font-size:14px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);color:var(--ink2);margin:8px 6px 0 0;background:#0e1628}
+.tag{font-size:13px;font-weight:700;letter-spacing:.8px;text-transform:uppercase}
+svg.wires{position:absolute;left:0;top:0;width:1600px;height:900px;pointer-events:none}
+.label{position:absolute;font-size:15px;color:var(--ink2);background:var(--bg);padding:3px 9px;border-radius:8px;border:1px solid var(--line)}
+.foot{position:absolute;left:72px;bottom:44px;font-size:18px;color:var(--muted)}
+.foot b{color:var(--ink2);font-weight:600}
+.code{background:#0a1120;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:15px;line-height:1.55;color:#cfe0ff;white-space:pre}
+.k{color:#8ab4ff}.s{color:#9fe2bf}.n{color:#ffcf7a}.c{color:var(--muted)}

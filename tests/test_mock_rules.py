@@ -18,12 +18,12 @@ from charles_mcp.mocks.rules import (
 
 def test_route_covers_rule_path_treats_the_rule_path_as_a_pattern() -> None:
     # A prefix route covers a rule whose wildcard sits inside that prefix.
-    assert route_covers_rule_path("/api/*", "/api/*/payoneer")
-    assert route_covers_rule_path("/api/*", "/api/p24-aos2/payoneer")
-    assert route_covers_rule_path("/*", "/api/*/payoneer")
+    assert route_covers_rule_path("/api/*", "/api/*/wallet")
+    assert route_covers_rule_path("/api/*", "/api/android-v2/wallet")
+    assert route_covers_rule_path("/*", "/api/*/wallet")
     # A narrower route does not cover a rule that also matches other segments.
-    assert not route_covers_rule_path("/api/p24-aos2/*", "/api/*/payoneer")
-    assert not route_covers_rule_path("/other/*", "/api/*/payoneer")
+    assert not route_covers_rule_path("/api/android-v2/*", "/api/*/wallet")
+    assert not route_covers_rule_path("/other/*", "/api/*/wallet")
     # An exact route covers only the identical exact path.
     assert route_covers_rule_path("/api/x", "/api/x")
     assert not route_covers_rule_path("/api/x", "/api/*")
@@ -103,26 +103,26 @@ def test_priority_then_specificity_decides() -> None:
 
 
 def test_path_patterns_cover_segments_that_vary_by_platform() -> None:
-    any_platform = _rule("any", path="/api/*/payoneer", body={"/action": "init"})
-    p24_only = _rule("p24", path="/api/p24-*/payoneer", body={"/action": "init"})
+    any_platform = _rule("any", path="/api/*/wallet", body={"/action": "init"})
+    android_only = _rule("android", path="/api/android-*/wallet", body={"/action": "init"})
 
     def picked(rule: MockRule, path: str) -> bool:
         return select_rule([rule], _request({"action": "init"}, path=path)) is not None
 
-    assert picked(any_platform, "/api/p24-aos2/payoneer")
-    assert picked(any_platform, "/api/p24-ios2/payoneer")
-    assert not picked(any_platform, "/api/payoneer")
-    assert not picked(any_platform, "/api/p24-aos2/v2/payoneer")
-    assert picked(p24_only, "/api/p24-aos2/payoneer")
-    assert not picked(p24_only, "/api/web-aos2/payoneer")
+    assert picked(any_platform, "/api/android-v2/wallet")
+    assert picked(any_platform, "/api/ios-v2/wallet")
+    assert not picked(any_platform, "/api/wallet")
+    assert not picked(any_platform, "/api/android-v2/v2/wallet")
+    assert picked(android_only, "/api/android-v2/wallet")
+    assert not picked(android_only, "/api/web-v2/wallet")
 
 
 def test_exact_path_wins_over_a_path_pattern() -> None:
-    pattern = _rule("pattern", path="/api/*/payoneer", body={"/action": "init"})
-    exact = _rule("exact", path="/api/p24-aos2/payoneer", body={"/action": "init"})
+    pattern = _rule("pattern", path="/api/*/wallet", body={"/action": "init"})
+    exact = _rule("exact", path="/api/android-v2/wallet", body={"/action": "init"})
 
-    chosen = select_rule([pattern, exact], _request({"action": "init"}, path="/api/p24-aos2/payoneer"))
-    other = select_rule([pattern, exact], _request({"action": "init"}, path="/api/p24-ios2/payoneer"))
+    chosen = select_rule([pattern, exact], _request({"action": "init"}, path="/api/android-v2/wallet"))
+    other = select_rule([pattern, exact], _request({"action": "init"}, path="/api/ios-v2/wallet"))
 
     assert chosen is not None and chosen.id == "exact"
     assert other is not None and other.id == "pattern"
@@ -130,9 +130,9 @@ def test_exact_path_wins_over_a_path_pattern() -> None:
 
 def test_priority_lifts_an_action_pattern_over_a_bare_exact_path() -> None:
     # A conditionless exact-path rule outranks an action pattern by default...
-    bare = _rule("bare", path="/api/p24-aos2/payoneer")
-    action = _rule("action", path="/api/*/payoneer", body={"/action": "init"})
-    request = _request({"action": "init"}, path="/api/p24-aos2/payoneer")
+    bare = _rule("bare", path="/api/android-v2/wallet")
+    action = _rule("action", path="/api/*/wallet", body={"/action": "init"})
+    request = _request({"action": "init"}, path="/api/android-v2/wallet")
     assert select_rule([bare, action], request).id == "bare"  # type: ignore[union-attr]
 
     # ...until the action rule is given a higher priority.
@@ -142,7 +142,7 @@ def test_priority_lifts_an_action_pattern_over_a_bare_exact_path() -> None:
 
 def test_double_star_in_a_rule_path_is_rejected() -> None:
     with pytest.raises(ValidationError, match=r"`\*\*` is not special"):
-        _rule("bad", path="/api/**/payoneer")
+        _rule("bad", path="/api/**/wallet")
 
 
 def test_disabled_rules_are_skipped() -> None:

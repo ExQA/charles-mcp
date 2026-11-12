@@ -1,0 +1,65 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><style>
+.chat{position:absolute;left:1080px;top:610px;width:448px}
+.bubble{border-radius:18px;padding:14px 16px;font-size:16.5px;line-height:1.45;margin-bottom:12px}
+.me{background:#1f3b6b;margin-left:40px;border-bottom-right-radius:6px}
+.ai{background:#13283a;border:1px solid #1d4b55;margin-right:20px;border-bottom-left-radius:6px;color:#d6f3ef}
+.ai .mono{font-size:14.5px;color:#9fe2bf}
+</style></head><body>
+<div class="title"><h1>Charles <b>MCP</b></h1><p>Give your AI agent Charles Proxy — read, analyse and mock mobile app traffic</p></div>
+
+<svg class="wires" viewBox="0 0 1600 900">
+ <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#5f7299"/></marker>
+ <marker id="t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#19b3a6"/></marker></defs>
+ <path d="M318 330 L446 330" stroke="#5f7299" stroke-width="3" fill="none" marker-end="url(#a)"/>
+ <path d="M760 330 L888 330" stroke="#19b3a6" stroke-width="3" fill="none" marker-end="url(#t)"/>
+ <path d="M888 360 L760 360" stroke="#19b3a6" stroke-width="3" fill="none" marker-end="url(#t)" stroke-dasharray="2 0"/>
+ <path d="M1200 345 L1310 345" stroke="#a78bfa" stroke-width="3" fill="none" marker-end="url(#a)"/>
+ <path d="M1310 375 L1200 375" stroke="#a78bfa" stroke-width="3" fill="none" marker-end="url(#a)"/>
+ <path d="M600 470 L600 600" stroke="#f2a93b" stroke-width="3" fill="none" marker-end="url(#a)"/>
+ <path d="M760 690 L880 690" stroke="#5f7299" stroke-width="3" fill="none" marker-end="url(#a)" stroke-dasharray="7 7"/>
+</svg>
+
+<div class="card" style="left:72px;top:230px;width:246px;height:240px">
+ <h3><span class="icon" style="background:#1d2f52">📱</span>Mobile app</h3>
+ <div class="sub">iOS or Android build under test, on a device or simulator</div>
+ <span class="pill">proxy → Charles</span>
+</div>
+
+<div class="card" style="left:446px;top:200px;width:314px;height:270px">
+ <h3><span class="icon" style="background:#3a2a12">🔶</span>Charles Proxy</h3>
+ <div class="sub">Records the session, decrypts HTTPS with SSL Proxying</div>
+ <span class="pill">Web Interface</span><span class="pill">Map Remote</span><span class="pill">recording</span>
+</div>
+
+<div class="card" style="left:888px;top:200px;width:312px;height:270px;border-color:#1d6b66">
+ <h3><span class="icon" style="background:#0f3d3a">🧩</span>charles-mcp</h3>
+ <div class="sub">MCP server: 53 tools, summaries first, one request in detail on demand</div>
+ <span class="pill">read</span><span class="pill">analyse</span><span class="pill">mock</span><span class="pill">reverse</span>
+</div>
+
+<div class="card" style="left:1310px;top:200px;width:218px;height:270px;border-color:#4b3d7a">
+ <h3><span class="icon" style="background:#2a2150">🤖</span>AI agent</h3>
+ <div class="sub">Claude Code, Cursor, Codex, Kiro — any MCP client</div>
+</div>
+
+<div class="card" style="left:446px;top:600px;width:314px;height:180px;border-color:#6b5222">
+ <h3><span class="icon" style="background:#3a2a12">🔀</span>Mock dispatcher</h3>
+ <div class="sub mono" style="font-size:15px">127.0.0.1:18080</div>
+ <div class="sub">Answers by rule, passes the rest through</div>
+</div>
+<div class="card" style="left:880px;top:630px;width:230px;height:120px">
+ <h3 style="font-size:19px"><span class="icon" style="background:#1d2f52;width:34px;height:34px;font-size:19px">🌐</span>Real API</h3>
+ <div class="sub" style="font-size:14px">unmocked requests</div>
+</div>
+
+<div class="label" style="left:330px;top:290px">HTTPS</div>
+<div class="label" style="left:772px;top:288px">session export</div>
+<div class="label" style="left:1212px;top:302px">MCP</div>
+<div class="label" style="left:612px;top:515px">Map Remote, one rule per domain</div>
+
+<div class="chat">
+ <div class="bubble me">The wallet screen shows 10.50. Make <b>get_balance</b> return 0 and <b>init</b> fail with 500.</div>
+ <div class="bubble ai">Found <span class="mono">POST /api/v1/wallet</span> with 2 actions. Created 2 rules, started the dispatcher. After refresh both responses carry <span class="mono">X-Charles-MCP-Rule</span>.</div>
+</div>
+<div class="foot"><b>github.com/ExQA/charles-mcp</b> · MIT</div>
+</body></html>

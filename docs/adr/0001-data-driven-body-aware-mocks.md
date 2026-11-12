@@ -16,7 +16,7 @@ The QA flow:
 
 What gets in the way:
 
-- **Map Local picks a file by URL only.** It ignores the query string and the method (verified on Charles 5.2.1). Many APIs send every operation as a POST to one URL and select the operation with a body field such as `{"action": "init"}` or `{"action": "get_cards"}`. Map Local can mock all variants of such an endpoint or none.
+- **Map Local picks a file by URL only.** It ignores the query string and the method (verified on Charles 5.2.1). Many APIs send every operation as a POST to one URL and select the operation with a body field such as `{"action": "init"}` or `{"action": "get_balance"}`. Map Local can mock all variants of such an endpoint or none.
 - **Map Local always answers 200**, so 4xx/5xx paths cannot be tested with it.
 - **Charles rules cannot change at runtime.** The web interface only toggles tools, and Charles rewrites its config file from memory on quit (verified 2026-09-10). Any file edit made while Charles runs is lost, even across a "restart".
 
