@@ -436,3 +436,36 @@ def test_health_probe_is_answered_locally_and_never_forwarded(env) -> None:
 
     assert response.status == 200
     assert upstream.bodies == []  # nothing was forwarded upstream
+
+
+def test_upstream_cookies_are_not_replayed_to_the_next_client(env) -> None:
+    """The dispatcher is a pipe, not a browser.
+
+    Every phone and simulator behind Charles shares it, so a Set-Cookie answered
+    to one client must never become a Cookie header on another client's request.
+    """
+    _, upstream, port = env
+
+    first, _ = _post(port, {"action": "login"})
+    _post(port, {"action": "init"})
+
+    assert first.msg.get_all("Set-Cookie") == ["a=1", "b=2"]  # the client still gets its cookies
+    assert "cookie" not in upstream.header_sets[0]
+    assert "cookie" not in upstream.header_sets[1]
+
+
+def test_a_clients_own_cookie_header_is_forwarded_untouched(env) -> None:
+    _, upstream, port = env
+    _post(port, {"action": "login"})
+
+    connection = HTTPConnection("127.0.0.1", port, timeout=5)
+    connection.request(
+        "POST",
+        "/api/wallet",
+        body=json.dumps({"action": "init"}).encode(),
+        headers={"Host": "localhost", "Content-Type": "application/json", "Cookie": "sid=mine"},
+    )
+    connection.getresponse().read()
+    connection.close()
+
+    assert upstream.header_sets[1]["cookie"] == "sid=mine"

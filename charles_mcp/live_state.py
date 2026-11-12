@@ -23,9 +23,33 @@ class LiveCaptureNotFoundError(LiveCaptureError):
     """Raised when a capture id does not exist."""
 
 
+# Charles statuses of an entry that will not change any more. Anything else —
+# RECEIVING_REQUEST_BODY, RECEIVING_RESPONSE_BODY, an open CONNECT tunnel — is
+# still in flight, and Charles keeps updating its sizes, timings and status.
+_FINAL_STATUSES = frozenset({"COMPLETE", "EXCEPTION"})
+
+
+def is_final_status(status: object) -> bool:
+    """Whether a Charles entry status means the entry is finished.
+
+    A missing status counts as finished: saved recordings and synthetic entries
+    do not always carry one, and nothing is going to update them.
+    """
+    if status is None or status == "":
+        return True
+    return str(status).upper() in _FINAL_STATUSES
+
+
 @dataclass
 class LiveCaptureState:
-    """Mutable runtime state for an active or stopped live capture."""
+    """Mutable runtime state for an active or stopped live capture.
+
+    ``entries`` holds every request of the capture once, in its latest state.
+    ``feed`` is the append-only list of things worth telling a reader about: a
+    request seen for the first time, and the same request again once it has
+    finished. Cursors are positions in the feed, so they stay valid for as long
+    as the Charles session is not cleared.
+    """
 
     capture_id: str
     managed: bool
@@ -36,10 +60,21 @@ class LiveCaptureState:
     status: Literal["active", "stopped"] = "active"
     cursor: int = 0
     started_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    seen_keys: set[str] = field(default_factory=set)
-    items: list[dict[str, Any]] = field(default_factory=list)
+    entries: dict[str, dict[str, Any]] = field(default_factory=dict)
+    finished: set[str] = field(default_factory=set)
+    feed: list[str] = field(default_factory=list)
+    # Requests that were already in the session when a capture with
+    # include_existing=False started: never shown, however they change later.
+    hidden: set[str] = field(default_factory=set)
     last_export_count: int = 0
+    # A cleared Charles session was noticed, and the reader has not been told yet.
+    reset_pending: bool = False
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def items(self) -> list[dict[str, Any]]:
+        """Every request of the capture, once, in the order it was first seen."""
+        return list(self.entries.values())
 
 
 CONTROL_HOST = "control.charles"
@@ -102,17 +137,15 @@ class LiveCaptureManager:
         )
 
         if baseline_items:
-            prepared = list(self._iter_unique_entries(baseline_items))
+            prepared = self._iter_unique_entries(baseline_items)
             capture.last_export_count = len(prepared)
             if include_existing:
                 # baseline_items come straight from a fresh session export that the
-                # caller discards, so store entries by reference; a deepcopy here
-                # doubles peak memory on a large session for no benefit.
-                for key, entry in prepared:
-                    capture.seen_keys.add(key)
-                    capture.items.append(entry)
+                # caller discards, so entries are stored by reference; a deepcopy
+                # here doubles peak memory on a large session for no benefit.
+                self._absorb(capture, prepared)
             else:
-                capture.seen_keys.update(key for key, _ in prepared)
+                capture.hidden.update(key for key, _ in prepared)
             if warning := self_recording_warning(baseline_items):
                 capture.warnings.append(warning)
 
@@ -139,45 +172,70 @@ class LiveCaptureManager:
         limit: int = 50,
         advance: bool = True,
     ) -> LiveCaptureReadResult:
+        """Take in a fresh session export and return what is new since ``cursor``.
+
+        What the capture knows about the session is updated on every read. Only
+        the cursor is the reader's own: ``advance=False`` looks without moving it.
+        """
         capture = self.require(capture_id)
-        base_cursor = capture.cursor if cursor is None else max(cursor, 0)
 
         if limit <= 0:
             raise ValueError("limit must be greater than 0")
 
-        prepared = list(self._iter_unique_entries(raw_items))
+        prepared = self._iter_unique_entries(raw_items)
         warnings: list[str] = []
-        status: Literal["active", "reset_detected", "stopped"] = capture.status
 
-        if len(prepared) < capture.last_export_count:
+        detected = len(prepared) < capture.last_export_count
+        if detected:
+            # The Charles session was cleared: everything known so far is gone,
+            # and so is the meaning of every cursor handed out before.
+            capture.entries.clear()
+            capture.finished.clear()
+            capture.feed.clear()
+            capture.hidden.clear()
+            capture.cursor = 0
+            capture.reset_pending = True
+        # The read that notices the reset reports it, and so does the next read
+        # that moves the cursor: that reader's position is the one that was lost.
+        reset = detected or (advance and capture.reset_pending)
+        if reset:
             warnings.append("session_reset_detected")
-            status = "reset_detected"
         if warning := self_recording_warning(raw_items):
             warnings.append(warning)
 
-        working_seen = capture.seen_keys if advance else set(capture.seen_keys)
-        working_items = capture.items if advance else list(capture.items)
+        self._absorb(capture, prepared)
+        capture.last_export_count = len(prepared)
 
-        if status == "reset_detected":
-            working_seen.clear()
-            working_items.clear()
+        if reset:
             base_cursor = 0
+        elif cursor is None:
+            base_cursor = capture.cursor
+        else:
+            base_cursor = min(max(cursor, 0), len(capture.feed))
+        status: Literal["active", "reset_detected", "stopped"] = (
+            "reset_detected" if reset else capture.status
+        )
 
-        for key, entry in prepared:
-            if key in working_seen:
-                continue
-            working_seen.add(key)
-            # raw_items come from a fresh export the caller discards; keep by reference.
-            working_items.append(entry)
-
-        total_new_items = max(len(working_items) - base_cursor, 0)
-        items = working_items[base_cursor: base_cursor + limit]
-        next_cursor = base_cursor + len(items)
-        truncated = total_new_items > limit
+        # A request can be in the feed twice (seen, then finished). A read returns
+        # it once, in its latest state.
+        pending = capture.feed[base_cursor:]
+        total_new_items = len(set(pending))
+        items: list[dict[str, Any]] = []
+        taken: set[str] = set()
+        consumed = 0
+        for key in pending:
+            if key not in taken:
+                if len(items) >= limit:
+                    break
+                taken.add(key)
+                items.append(capture.entries[key])
+            consumed += 1
+        next_cursor = base_cursor + consumed
+        truncated = total_new_items > len(items)
 
         if advance:
             capture.cursor = next_cursor
-            capture.last_export_count = len(prepared)
+            capture.reset_pending = False
             capture.warnings = warnings
             if capture.status != "stopped":
                 capture.status = "active"
@@ -192,10 +250,32 @@ class LiveCaptureManager:
             warnings=warnings,
         )
 
+    @staticmethod
+    def _absorb(capture: LiveCaptureState, prepared: list[tuple[str, dict[str, Any]]]) -> None:
+        """Store the latest state of every entry and queue what a reader should see.
+
+        Charles keeps updating an entry while it is in flight: an open CONNECT
+        tunnel changes its sizes and timings on every export. The entry is one
+        request all along, so it is replaced in place. It goes to the feed when
+        it is first seen and once more when it has finished, which is when its
+        status and response become final.
+        """
+        for key, entry in prepared:
+            if key in capture.hidden:
+                continue
+            is_new = key not in capture.entries
+            capture.entries[key] = entry
+            is_final = is_final_status(entry.get("status"))
+            if is_new or (is_final and key not in capture.finished):
+                capture.feed.append(key)
+            if is_final:
+                capture.finished.add(key)
+
     def _iter_unique_entries(
         self,
         raw_items: list[dict[str, Any]],
     ) -> list[tuple[str, dict[str, Any]]]:
+        """Pair every entry of an export with a key that names the request itself."""
         counts: dict[str, int] = {}
         prepared: list[tuple[str, dict[str, Any]]] = []
 
@@ -206,6 +286,9 @@ class LiveCaptureManager:
                 continue
 
             fingerprint = self._fingerprint(entry)
+            # Two requests can share every identifying field (synthetic entries,
+            # exports of older Charles versions without client ports). Charles
+            # keeps the export order, so the position among equals tells them apart.
             counts[fingerprint] = counts.get(fingerprint, 0) + 1
             prepared.append((f"{fingerprint}:{counts[fingerprint]}", entry))
 
@@ -216,31 +299,21 @@ class LiveCaptureManager:
         return sha1(payload.encode("utf-8")).hexdigest()
 
     def _fingerprint_components(self, entry: dict[str, Any]) -> str:
-        request = entry.get("request") or {}
-        response = entry.get("response") or {}
-        request_header = request.get("header") or {}
-        response_header = response.get("header") or {}
-        request_sizes = request.get("sizes") or {}
-        response_sizes = response.get("sizes") or {}
-        times = entry.get("times") or {}
-        durations = entry.get("durations") or {}
+        """The fields that identify a request and never change while it runs.
 
+        Status, sizes, timings and the response are deliberately left out: they
+        change as the request proceeds, and a fingerprint built on them made
+        every in-flight entry look like a new one on each export — the capture
+        then listed the same request several times. Bodies are never part of it.
+        """
+        times = entry.get("times") or {}
         components = [
             str(entry.get("host") or ""),
             str(entry.get("method") or ""),
             str(entry.get("path") or ""),
             str(entry.get("query") or ""),
-            str(entry.get("status") or ""),
-            str(response.get("status") or ""),
             str(times.get("start") or ""),
-            str(times.get("end") or ""),
-            str(durations.get("total") or ""),
-            str(entry.get("totalSize") or ""),
-            str(request.get("mimeType") or ""),
-            str(response.get("mimeType") or ""),
-            str(request_sizes.get("body") or ""),
-            str(response_sizes.get("body") or ""),
-            str(request_header.get("firstLine") or ""),
-            str(response_header.get("firstLine") or ""),
+            str(entry.get("clientAddress") or ""),
+            str(entry.get("clientPort") or ""),
         ]
         return "|".join(components)

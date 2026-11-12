@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -58,18 +59,22 @@ class IngestService:
                         "native session parsing failed and CHARLES_CLI_PATH is unavailable for conversion fallback"
                     ) from None
                 target_path = self.config.temp_dir / f"{capture_id}.xml"
-                xml_path = convert_native_session_to_xml(
-                    charles_cli_path=self.config.charles_cli_path,
-                    source_path=path,
-                    target_path=target_path,
-                )
-                warnings.append("native_session_converted_to_xml")
-                metadata["converted_xml_path"] = str(xml_path)
-                imported = parse_charles_xml_session(
-                    xml_path,
-                    capture_id=capture_id,
-                    source_kind=source_kind,
-                )
+                try:
+                    xml_path = convert_native_session_to_xml(
+                        charles_cli_path=self.config.charles_cli_path,
+                        source_path=path,
+                        target_path=target_path,
+                    )
+                    warnings.append("native_session_converted_to_xml")
+                    imported = parse_charles_xml_session(
+                        xml_path,
+                        capture_id=capture_id,
+                        source_kind=source_kind,
+                    )
+                finally:
+                    # The converted copy is a whole session in plain text and is
+                    # ours alone; the caller's own file is never touched.
+                    target_path.unlink(missing_ok=True)
             imported.capture.metadata.update(metadata)
             return self._persist_imported(imported, warnings=warnings)
 
@@ -83,6 +88,11 @@ class IngestService:
 
     def _persist_imported(self, imported: Any, *, warnings: list[str]) -> dict[str, Any]:
         """Persist a parsed capture graph in one transaction."""
+        if imported.capture.started_at is None and imported.capture.ended_at is None:
+            # Neither export format dates the session, and a capture without a
+            # date can never be aged out: retention kept every one of them. The
+            # time it was stored is what "older than N days" is about anyway.
+            imported.capture.started_at = datetime.now(timezone.utc)
         with self.store.transaction():
             self.store.upsert_capture(imported.capture)
             for graph in imported.entries:

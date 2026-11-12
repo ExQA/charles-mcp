@@ -45,6 +45,38 @@ def _token_addresses_array(token: str) -> bool:
     return token == "-" or token.isdigit() or _SELECTOR.match(token) is not None
 
 
+def _array_tokens_differ(x: str, y: str) -> bool:
+    """True when two array tokens certainly address different elements.
+
+    Two positions do when the numbers differ, and two selectors on the same
+    field do when the values differ: ``[currency=USD]`` and ``[currency=EUR]``
+    are two elements, whatever order the server returns them in. Anything
+    else — a position against a selector, selectors on different fields, the
+    append token ``-`` — cannot be decided without the document.
+    """
+    if x.isdigit() and y.isdigit():
+        return int(x) != int(y)
+    selector_x, selector_y = _SELECTOR.match(x), _SELECTOR.match(y)
+    if selector_x and selector_y and selector_x.group(1) == selector_y.group(1):
+        return not _selector_values_equal(selector_x.group(2), selector_y.group(2))
+    return False
+
+
+def _selector_values_equal(a: str, b: str) -> bool:
+    """Whether two selector values pick the same element, as _value_matches reads them."""
+    if a == b:
+        return True
+    try:
+        parsed_a, parsed_b = json.loads(a), json.loads(b)
+    except ValueError:
+        return False
+    # Only non-string fields compare by JSON value ([balance=0] is [balance=0.0]);
+    # a string field compares as written, so differently written values differ.
+    if isinstance(parsed_a, str) or isinstance(parsed_b, str):
+        return False
+    return bool(parsed_a == parsed_b)
+
+
 def pointers_may_alias(a: str, b: str) -> bool:
     """Could two patch pointers hit the same element by different addressing?
 
@@ -52,6 +84,9 @@ def pointers_may_alias(a: str, b: str) -> bool:
     document, so a rule that carries both may edit the wrong element. Same
     length, differing only where one side indexes an array (index / selector /
     ``-``) and the other addresses that same array differently.
+
+    Two pointers that certainly address different elements are not aliases:
+    ``/list/[id=1]/x`` and ``/list/[id=2]/x`` are two edits, and both stay.
     """
     if a == b:
         return True
@@ -63,6 +98,8 @@ def pointers_may_alias(a: str, b: str) -> bool:
         if x == y:
             continue
         if _token_addresses_array(x) and _token_addresses_array(y):
+            if _array_tokens_differ(x, y):
+                return False
             saw_array_divergence = True
             continue
         return False

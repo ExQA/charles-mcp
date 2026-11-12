@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CharlesStatusConfig(BaseModel):
@@ -43,3 +43,5 @@ class CharlesStatusResult(BaseModel):
     charles_info: dict[str, Any] | None = None
     error: str | None = None
     recommended_next_action: str | None = None
+    # Things that are wrong right now and need the user or a tool call to fix.
+    warnings: list[str] = Field(default_factory=list)

@@ -172,6 +172,20 @@ def test_pointers_may_alias_flags_index_versus_selector() -> None:
     assert not pointers_may_alias("/list/1/x", "/list/1")
 
 
+def test_pointers_to_different_array_elements_are_not_aliases() -> None:
+    # Two values of one field are two elements, in whatever order the server sends them.
+    assert not pointers_may_alias("/list/[currency=USD]/x", "/list/[currency=EUR]/x")
+    assert not pointers_may_alias("/list/[id=1]/x", "/list/[id=2]/x")
+    assert not pointers_may_alias("/list/0/x", "/list/1/x")
+    assert not pointers_may_alias("/a/[id=1]/b/[k=x]/v", "/a/[id=2]/b/0/v")
+    # One element written two ways is still one element.
+    assert pointers_may_alias("/list/[balance=0]/x", "/list/[balance=0.0]/x")
+    # Selectors on different fields may pick the same element.
+    assert pointers_may_alias("/list/[id=1]/x", "/list/[currency=USD]/x")
+    # A string field compares as written, so these are two different values.
+    assert not pointers_may_alias('/list/[code="1"]/x', "/list/[code=1]/x")
+
+
 @pytest.mark.parametrize(
     ("patch", "message"),
     [

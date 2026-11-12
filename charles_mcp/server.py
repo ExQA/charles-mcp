@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -41,6 +42,8 @@ from charles_mcp.tools.purge import register_purge_tools, run_purge
 
 logger = logging.getLogger(__name__)
 
+SHUTDOWN_HOOK_ATTR = "_charles_shutdown"
+
 
 def backup_config(config: Config) -> bool:
     """Compatibility wrapper kept for lifecycle tests and monkeypatching."""
@@ -79,6 +82,16 @@ def create_server(config: Config | None = None) -> FastMCP[ToolDependencies]:
         analysis_service=traffic_analysis_service,
     )
     reverse_runtime = build_reverse_runtime(config)
+    mock_service = MockService(
+        config,
+        traffic_query_service=traffic_query_service,
+        client_factory=CharlesClient,
+    )
+    rule_service = RuleService(
+        config,
+        traffic_query_service=traffic_query_service,
+        client_factory=CharlesClient,
+    )
     deps = ToolDependencies(
         config=config,
         client_factory=CharlesClient,
@@ -86,6 +99,7 @@ def create_server(config: Config | None = None) -> FastMCP[ToolDependencies]:
         history_service=history_service,
         traffic_query_service=traffic_query_service,
         restore_config_fn=restore_config,
+        routing_warnings_fn=rule_service.routing_warnings,
     )
 
     @asynccontextmanager
@@ -112,6 +126,15 @@ def create_server(config: Config | None = None) -> FastMCP[ToolDependencies]:
         try:
             yield deps
         finally:
+            # The dispatcher dies with this process. If Map Remote stayed on,
+            # Charles would keep sending the routed traffic to a dead port and
+            # every such request would fail in the app, so switch it off first.
+            # Shielded and bounded: it must run even when the server is being
+            # cancelled, and a Charles that is already gone must not hold it up.
+            try:
+                await asyncio.wait_for(asyncio.shield(rule_service.shutdown()), timeout=5)
+            except Exception:
+                logger.warning("could not switch Map Remote off on shutdown", exc_info=True)
             if config.manage_charles_lifecycle:
                 await restore_config(config)
             reverse_runtime.store.close()
@@ -138,22 +161,11 @@ def create_server(config: Config | None = None) -> FastMCP[ToolDependencies]:
     register_history_tools(mcp)
     register_reset_tools(mcp)
     register_reverse_tools(mcp, reverse_runtime)
-    register_mock_tools(
-        mcp,
-        MockService(
-            config,
-            traffic_query_service=traffic_query_service,
-            client_factory=CharlesClient,
-        ),
-    )
-    register_mock_rule_tools(
-        mcp,
-        RuleService(
-            config,
-            traffic_query_service=traffic_query_service,
-            client_factory=CharlesClient,
-        ),
-    )
+    register_mock_tools(mcp, mock_service)
+    register_mock_rule_tools(mcp, rule_service)
+    # The entrypoint runs this when the process is told to terminate and the
+    # lifespan above will not get the chance to (see main._cleanup_on_sigterm).
+    setattr(mcp, SHUTDOWN_HOOK_ATTR, rule_service.shutdown)
     register_purge_tools(mcp, config, reverse_runtime.config.database_path)
     register_charles_settings_tools(mcp, config)
 

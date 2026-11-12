@@ -39,6 +39,8 @@ class PurgeReport:
     backups: list[str] = field(default_factory=list)
     reverse_captures: int = 0
     reverse_undated: int = 0
+    # Session exports the reverse live tools left behind in their temp folder.
+    reverse_exports: list[str] = field(default_factory=list)
     freed_bytes: int = 0
 
     def summary(self) -> str:
@@ -52,6 +54,8 @@ class PurgeReport:
             f"{verb} {', '.join(parts)} older than {self.older_than_days} day(s), "
             f"{self.freed_bytes / 1_048_576:.1f} MB of files"
         )
+        if self.reverse_exports:
+            text += f"; {len(self.reverse_exports)} leftover reverse session export file(s)"
         if self.reverse_undated:
             text += (
                 f"; {self.reverse_undated} reverse capture(s) have no timestamp and were kept"
@@ -95,6 +99,14 @@ def purge_stored_data(
                     if path.stat().st_mtime < cutoff:
                         report.backups.append(f"{folder.name}/{path.name}")
                         report.freed_bytes += _remove(path, dry_run)
+
+    if "reverse" in scopes and reverse_database:
+        # Whole-session exports the reverse live tools wrote before importing
+        # them. They are deleted after the import now; this clears what older
+        # versions left, and anything a crash leaves in future.
+        for path in _old_files(Path(reverse_database).parent / "tmp", "*", cutoff):
+            report.reverse_exports.append(path.name)
+            report.freed_bytes += _remove(path, dry_run)
 
     if "reverse" in scopes and reverse_database and Path(reverse_database).is_file():
         removed, undated = _purge_reverse(Path(reverse_database), cutoff, dry_run)

@@ -360,6 +360,120 @@ def test_merge_patches_drops_a_patch_that_aliases_a_new_one() -> None:
     assert aliased == ["/data/balanceList/1/balance"]
 
 
+def test_merge_patches_keeps_edits_of_different_array_elements() -> None:
+    usd = {"op": "set", "path": "/data/balanceList/[currency=USD]/balance", "value": "1000.00"}
+    eur = {"op": "set", "path": "/data/balanceList/[currency=EUR]/balance", "value": "5.00"}
+
+    merged, aliased = rule_service_module.merge_patches([usd], [eur])
+
+    assert merged == [usd, eur]
+    assert aliased == []
+
+
+@pytest.mark.asyncio
+async def test_a_second_edit_of_another_list_item_keeps_the_first(env) -> None:
+    server, fake_client, _ = env
+    entry = _entry("init", balance=120, second=1)
+    entry["response"]["body"]["text"] = json.dumps(
+        {"data": {"items": [{"id": 1, "amount": 0.5}, {"id": 2, "amount": 7.5}]}}
+    )
+    capture_id = await _capture(server, fake_client, [entry])
+    base = {
+        "source": "live",
+        "capture_id": capture_id,
+        "entry_id": await _entry_id(server, capture_id, '"init"'),
+        "match_body_fields": ["/action"],
+    }
+
+    await server.call_tool("mock_rule_create_from_entry", {
+        **base,
+        "response_patches": [{"op": "set", "path": "/data/items/[id=2]/amount", "value": 99.0}],
+    })
+    second = _tool_result(await server.call_tool("mock_rule_create_from_entry", {
+        **base,
+        "response_patches": [{"op": "set", "path": "/data/items/[id=1]/amount", "value": 55.0}],
+    }))
+
+    rule = json.loads(second["rule_json"])
+    assert [patch["path"] for patch in rule["response"]["patches"]] == [
+        "/data/items/[id=2]/amount",
+        "/data/items/[id=1]/amount",
+    ]
+    assert not any("dropped the previous patch" in warning for warning in second["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_merge_keeps_what_the_call_does_not_set(env) -> None:
+    """A rule switched off (by hand or by a scenario) must not come back on its own."""
+    server, fake_client, _ = env
+    capture_id = await _capture(server, fake_client, [_entry("init", balance=120, second=1)])
+    base = {
+        "source": "live",
+        "capture_id": capture_id,
+        "entry_id": await _entry_id(server, capture_id, '"init"'),
+        "match_body_fields": ["/action"],
+    }
+    first = _tool_result(await server.call_tool("mock_rule_create_from_entry", {
+        **base,
+        "priority": 7,
+        "response_patches": [{"op": "set", "path": "/data/balance", "value": 0}],
+    }))
+    rule_id = first["rule"]["id"]
+    # Conditions and headers only mock_rule_write can set.
+    document = json.loads(first["rule_json"])
+    document["match"]["headers"] = {"x-platform": "ios"}
+    document["response"]["headers"] = {"X-Mocked": "yes"}
+    await server.call_tool("mock_rule_write", {"rule": document})
+    await server.call_tool(
+        "mock_rule_set_enabled", {"host": "*", "rule_id": rule_id, "enabled": False}
+    )
+
+    merged = _tool_result(await server.call_tool("mock_rule_create_from_entry", {
+        **base,
+        "response_patches": [{"op": "set", "path": "/status", "value": "mocked"}],
+    }))
+
+    rule = json.loads(merged["rule_json"])
+    assert rule["enabled"] is False
+    assert rule["priority"] == 7
+    assert rule["match"]["headers"] == {"x-platform": "ios"}
+    assert rule["response"]["headers"] == {"X-Mocked": "yes"}
+    assert rule["created_at"] == document["created_at"]
+    assert [patch["path"] for patch in rule["response"]["patches"]] == ["/data/balance", "/status"]
+    assert any("stays disabled" in warning for warning in merged["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_merge_false_starts_the_rule_from_scratch(env) -> None:
+    server, fake_client, _ = env
+    capture_id = await _capture(server, fake_client, [_entry("init", balance=120, second=1)])
+    base = {
+        "source": "live",
+        "capture_id": capture_id,
+        "entry_id": await _entry_id(server, capture_id, '"init"'),
+        "match_body_fields": ["/action"],
+    }
+    first = _tool_result(await server.call_tool("mock_rule_create_from_entry", {
+        **base,
+        "priority": 7,
+        "response_patches": [{"op": "set", "path": "/data/balance", "value": 0}],
+    }))
+    await server.call_tool(
+        "mock_rule_set_enabled", {"host": "*", "rule_id": first["rule"]["id"], "enabled": False}
+    )
+
+    replaced = _tool_result(await server.call_tool("mock_rule_create_from_entry", {
+        **base,
+        "merge": False,
+        "response_patches": [{"op": "set", "path": "/status", "value": "mocked"}],
+    }))
+
+    rule = json.loads(replaced["rule_json"])
+    assert rule["enabled"] is True
+    assert rule["priority"] == 0
+    assert [patch["path"] for patch in rule["response"]["patches"]] == ["/status"]
+
+
 @pytest.mark.asyncio
 async def test_end_to_end_capture_rule_dispatcher(env) -> None:
     server, fake_client, config = env
@@ -739,3 +853,70 @@ async def test_verify_names_the_likely_cause_for_each_probe_answer(
     assert expected in message
     if status == 404:
         assert "Map Remote is off" in message
+
+
+# The two pages a real Charles 5 answered a refused CONNECT with (2026-11-10).
+_MAPPING_TO_A_URL = (
+    "<html><head><style>body { font-family: Arial; }</style></head><body>"
+    "<h1>Charles Error Report</h1><h2>Name lookup failed for remote host</h2>"
+    "<p>Charles failed to resolve the name of the remote host into an IP address. "
+    "Check that the URL is correct.</p><p>The actual exception reported was:</p>"
+    "<pre>java.net.UnknownHostException: http:&#x2F;&#x2F;127.0.0.1:18080: "
+    "nodename nor servname provided, or not known</pre>"
+    "<p>Charles Proxy, https://www.charlesproxy.com/</p></body></html>"
+)
+_NO_MAPPING = _MAPPING_TO_A_URL.replace(
+    "http:&#x2F;&#x2F;127.0.0.1:18080", "charles-mcp-probe.example.com"
+)
+
+
+def test_the_exception_on_a_charles_error_page_is_read_with_its_host() -> None:
+    assert rule_service_module.parse_charles_error_page(_MAPPING_TO_A_URL) == (
+        "java.net.UnknownHostException",
+        "http://127.0.0.1:18080: nodename nor servname provided, or not known",
+    )
+    assert rule_service_module.parse_charles_error_page("<html>no report here</html>") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page", "expected", "unexpected"),
+    [
+        # A URL typed into the Host field of the mapping: Charles applies the
+        # mapping and then cannot resolve "http://127.0.0.1:18080" as a name.
+        (_MAPPING_TO_A_URL, "destination `http://127.0.0.1:18080` is not a host name", "is off"),
+        # No mapping applied: Charles tried the unresolvable probe host itself.
+        (_NO_MAPPING, "no Map Remote mapping applied", "not a host name"),
+        # Charles could not be asked: the old, general answer.
+        (None, "Charles did not route the probe", "not a host name"),
+    ],
+    ids=["destination-is-a-url", "mapping-not-applied", "charles-silent"],
+)
+async def test_verify_tells_a_broken_mapping_from_a_missing_one(
+    env, monkeypatch, page: str | None, expected: str, unexpected: str
+) -> None:
+    import httpx
+
+    _server, _fake_client, config = env
+    service = rule_service_module.RuleService(config, traffic_query_service=None)
+    real_client = httpx.AsyncClient
+
+    def refusing_client(**kwargs):
+        def refuse(request):
+            raise httpx.ProxyError("503 Error")
+
+        return real_client(transport=httpx.MockTransport(refuse))
+
+    async def reason(self, host: str):
+        return rule_service_module.parse_charles_error_page(page) if page else None
+
+    monkeypatch.setattr(rule_service_module.httpx, "AsyncClient", refusing_client)
+    monkeypatch.setattr(rule_service_module.RuleService, "_refused_tunnel_reason", reason)
+    route = RouteConfig(host="*.example.com", paths=["/api/*"])
+
+    message = await service._probe_through_charles(route, "/api/*")
+
+    assert expected in message
+    assert unexpected not in message
+    if page == _MAPPING_TO_A_URL:
+        assert f"Port {config.dispatcher_port}" in message

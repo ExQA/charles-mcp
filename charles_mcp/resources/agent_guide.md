@@ -14,7 +14,7 @@ Everything an agent needs to use this MCP server correctly: the operating model,
 1. **Never clear the user's Charles session** unless they explicitly ask. `start_live_capture` adopts the running session by default; pass `reset_session=true` only on an explicit request — a wrong wipe cannot be undone.
 2. **Never write the Charles config while Charles runs.** Charles rewrites its config from memory on quit, so the edit is lost. `apply=true` refuses while the proxy port is open; do not work around it.
 3. **Never quit or restart Charles without the user's consent.** Quitting loses the unsaved session. Ask the user to save it (File → Save Session) first.
-4. **Never call `reset_environment` unless the user asks for exactly that.** It quits Charles, overwrites its config from a backup and deletes saved recordings.
+4. **Never call `reset_environment` unless the user asks for exactly that.** It quits Charles, overwrites its config from a backup and deletes saved recordings. The backup exists only when the server manages Charles (`CHARLES_MANAGE_LIFECYCLE=true`); without one the tool changes nothing and says so.
 5. **Never replay requests or forward patched requests to production without consent.** `reverse_replay_entry` and dispatcher patch rules send real requests, with real credentials, to real servers.
 6. **Never write captured values into source code, tests, commits or shared files,** and never suggest committing `~/charles-mocks`. Use synthetic data when a mock must be shared.
 7. **Do not repeat secrets back to the user** (tokens, passwords, full card numbers) unless they are needed for the task; refer to them by field name.
@@ -24,9 +24,9 @@ Everything an agent needs to use this MCP server correctly: the operating model,
 
 ## 3. First checks
 
-1. `charles_status` — Charles reachable? Web Interface credentials right? Active capture? Follow its `recommended_next_action`.
-2. HTTPS: Charles must have **SSL Proxying** enabled for the API hosts and the device must trust the Charles certificate. Without it Charles only sees a tunnel, the path is unknown, and path-based rules never fire.
-3. Session size: if exports are slow, suggest clearing the session before the scenario and, when only a phone is tested, turning off Proxy → macOS Proxy in Charles.
+1. `charles_status` — Charles reachable? Web Interface credentials right? Active capture? Follow its `recommended_next_action`. Its `warnings` name what is broken right now: `map_remote_without_dispatcher` means Map Remote is on in Charles while nothing listens on the dispatcher port, so every request under a mocked route fails in the app — tell the user, then start the dispatcher or run `mock_dispatcher(action="stop")`.
+2. HTTPS: Charles must have **SSL Proxying** enabled for the API hosts and the device must trust the Charles certificate. Without it Charles only sees a tunnel, the path is unknown, and path-based rules never fire. A `ssl_proxying_off` warning on a query means exactly this: only CONNECT tunnels were recorded for the capture or for the host you filtered by — tell the user instead of reporting that the app sent nothing.
+3. Session size: if exports are slow, suggest clearing the session before the scenario and, when only a phone is tested, turning off Proxy → macOS Proxy in Charles. A `slow_export` warning gives the measured time; every call that reads traffic pays it again. Detail of a finished request (`get_traffic_entry_detail`, creating a mock from it) is served from the last export and costs nothing extra.
 4. A `charles_records_own_exports` warning means Charles is recording this server's own session exports, and the session will grow on every call. Relay the fix to the user rather than carrying on: exclude host `control.charles` — by hand in Proxy → Recording Settings, or with `charles_recording_exclude(apply=true)` once they have quit Charles — then clear the session, which is theirs to do.
 
 ## 4. Identities
@@ -49,8 +49,8 @@ Keep identities between calls and never mix them across planes.
 | Tool | Use | Notes |
 |---|---|---|
 | `start_live_capture(reset_session=false, adopt_existing=true, start_recording_if_stopped=true)` | Begin reading the current session | **The capture always includes the traffic recorded before the call**; there is no option to hide it. The first `read_live_capture` returns the existing entries, later reads only new ones. Only one capture can be active |
-| `query_live_capture_entries(capture_id, ...)` | Structured, filtered summaries | Read-only, does not move the cursor. Filters: `host_contains`, `path_contains`, `method_in`, `status_in`, header name/value, content types, `request_body_contains` / `response_body_contains`, `request_json_query` / `response_json_query` (JMESPath), size, `since_seconds`. Defaults are small (`max_items=10`, `scan_limit=500`) — raise them for big sessions |
-| `read_live_capture(capture_id, cursor, limit)` | Consume new entries (route-level only) | Advances the cursor |
+| `query_live_capture_entries(capture_id, ...)` | Structured, filtered summaries | Read-only, does not move the cursor. Filters: `host_contains`, `path_contains`, `method_in`, `status_in`, header name/value, content types, `request_body_contains` / `response_body_contains`, `request_json_query` / `response_json_query` (JMESPath), size, `since_seconds`. The whole capture is examined on every call: `since_seconds`, `host_contains`, `path_contains`, `method_in` and the preset's noise classes apply first, then `scan_limit` (default 500) caps how many of the remaining entries are analysed, newest first. A `scan_limit_reached` warning means older candidates were left out — narrow the filters or raise `scan_limit`. `max_items` (default 10) only limits how many summaries come back |
+| `read_live_capture(capture_id, cursor, limit)` | Consume new entries (route-level only) | Advances the cursor. A request returned while still in flight comes once more when it has finished, with its status; an `entry_id` stays the same before and after |
 | `peek_live_capture(capture_id, cursor, limit)` | Preview new entries | Does not advance |
 | `stop_live_capture(capture_id, persist=true)` | End the capture | `persist=true` saves a `.chlsj` snapshot to the state dir. `status="stop_failed"` with `recoverable=true` means the capture is still alive — call again |
 
@@ -64,7 +64,7 @@ Keep identities between calls and never mix them across planes.
 
 ### 5.3 Saved recordings (only when the user mentions a saved file)
 
-`list_recordings`, `get_recording_snapshot(path)`, `analyze_recorded_traffic(recording_path, ...)`, `query_recorded_traffic(host_contains, http_method, keyword_regex)`.
+`list_recordings`, `get_recording_snapshot(path, offset, limit)`, `analyze_recorded_traffic(recording_path, ...)`, `query_recorded_traffic(host_contains, http_method, keyword_regex, max_items)`. The snapshot and query tools return compact summaries with an `entry_id` (the query adds 256-character body previews), never whole bodies; open one entry with `get_traffic_entry_detail(source="history", recording_path, entry_id)`.
 
 ### 5.4 Status and control
 
@@ -97,12 +97,12 @@ Limits: status is always 200; the query string and HTTP method are ignored (all 
 | Tool | Notes |
 |---|---|
 | `mock_route_setup(host, path="/*", apply=false, port=443, verify_tls=true)` | Once per **domain**: `host="*.example.com"`, `path="/api/*"`. One Charles Map Remote rule covers every host, path and action under it. `apply=true` needs Charles closed (section 7). `verify_tls=false` for servers with an internal CA |
-| `mock_discover_variants(source, capture_id / recording_path, host_contains, path_contains, body_field="/action", methods, limit, max_groups)` | Whole-session overview: method × host × path × body-field value (`null` for GETs and bodies without the field), counts, sample `entry_ids`, statuses. One export. For history it returns the `recording_path` to reuse |
+| `mock_discover_variants(source, capture_id / recording_path, host_contains, path_contains, body_field="/action", methods, limit, max_groups)` | Whole-session overview: method × host × path × body-field value (`null` for GETs and bodies without the field), counts, sample `entry_ids`, statuses. One export. The filters apply to the whole session; `limit` (default 2000) then caps how many matching entries are read, newest first, with a warning when older ones were left out. For history it returns the `recording_path` to reuse |
 | `mock_rule_create_from_entry(source, entry_id, capture_id / recording_path, match_body_fields, match_query_fields, mode="patch", response_patches, request_patches, request_headers, status, delay_ms, priority, host_scope="any", host, match_path, merge=true, rule_id, description)` | The main tool. Details in 6.3 |
 | `mock_rule_write(rule, fixture_json or fixture_text)` | Full rule document by hand (advanced) |
 | `mock_rule_list(host)`, `mock_rule_get(host, rule_id)` | Review; `errors` lists rule files the dispatcher ignores |
 | `mock_rule_set_enabled(host, rule_id, enabled)`, `mock_rule_remove(host, rule_id)` | Pause or archive a rule. `host` is the **rule's** host: `*` for general rules |
-| `mock_dispatcher(action="start" / "stop" / "status", port, toggle_map_remote=true)` | Start also turns Charles Map Remote on; stop turns it off. The dispatcher lives inside the MCP server and stops with it; for long runs the user can start `charles-mcp-dispatcher --port 18080` in a terminal instead |
+| `mock_dispatcher(action="start" / "stop" / "status", port, toggle_map_remote=true)` | Start also turns Charles Map Remote on; stop turns it off. The dispatcher lives inside the MCP server and stops with it. Map Remote is one switch for all of Charles, so switching it off also stops the user's own Map Remote mappings: on exit the server switches it off only if it found it off and switched it on itself, and `start` says when it was already on and will be left on. `stop` switches Map Remote off even when no dispatcher runs here: use it when `status` or `charles_status` reports `map_remote_without_dispatcher`, and tell the user that their own mappings stop too. These checks look only at the configured port (`CHARLES_DISPATCHER_PORT`); a dispatcher started on another port is not seen. For long runs the user can start `charles-mcp-dispatcher --port 18080` in a terminal instead |
 | `mock_dispatcher(action="verify")` | Proves the whole path without the app: it probes the dispatcher directly, then sends one probe per route through the Charles proxy and says for each whether Charles routed it. Use it whenever a rule seems not to fire — most often the answer is that Charles was never restarted after `apply=true` |
 | `mock_scenario_save(name, rules=None, description)` | Names a set of rules — a whole QA flow such as "payment fails after login". Without `rules` it saves the rules enabled right now, so the usual order is: build the rules, enable exactly those, save |
 | `mock_scenario_apply(name, enabled=true, exclusive=true)` | Switches a flow on in one call; `exclusive` turns every other rule off so mocks from the previous flow cannot linger. `enabled=false` turns only this scenario's rules off |
@@ -200,11 +200,11 @@ Verified on Charles 5.2.1: a host glob matches its subdomains, the path reaches 
 | Symptom | Cause |
 |---|---|
 | No `X-Charles-MCP-Rule` header | Map Remote off (start the dispatcher), the Charles rule was not saved (Cancel instead of Done), host/path/protocol mismatch, no SSL Proxying |
-| Charles 503 "Name lookup failed" | Map Remote did not apply; Charles went to the original host |
+| Charles 503 "Name lookup failed" | Either Map Remote did not apply and Charles went to the original host, or the mapping applied but its destination is not a host name (a whole URL typed into the Host field). `mock_dispatcher(action="verify")` reads Charles's error page and says which |
 | `passthrough` | Request reached the dispatcher but no rule matched: path, method, `action` value, disabled rule |
 | 421 from the dispatcher | Host or path not covered by a route — `mock_route_setup` |
 | 502 from the dispatcher | Upstream unreachable: network/VPN, timeout, certificate (`verify_tls`) |
-| Every request to the domain fails | Map Remote on, dispatcher not running |
+| Every request to the domain fails | Map Remote on, dispatcher not running: `charles_status` reports `map_remote_without_dispatcher`; start the dispatcher or `mock_dispatcher(action="stop")` |
 | `X-Charles-MCP-Warning` | A patch did not apply (non-JSON body, path not found); response sent without it |
 | Mocked value did not change in the app | The app may cache; ask the user to pull-to-refresh or relaunch; check the rule matched |
 | Exports are slow / time out | Session too big: clear it, turn off macOS proxy recording, narrow with `host_contains` |
@@ -216,6 +216,7 @@ Verified on Charles 5.2.1: a host glob matches its subdomains, the path reaches 
 - Dispatcher: no WebSockets; downloads are buffered in full; gzip-compressed request bodies are not parsed; a JSON `true` does not equal a form `"true"` in matching; paths match exactly unless the rule uses `*` (`/users/1` ≠ `/users/2`).
 - No timeout or dropped-connection simulation: only `delay_ms` and the response code.
 - Only one live capture at a time.
+- Charles gives its entries no id. A request is identified by host, method, path, query, start time and the client's address and port. Two requests equal in all of these (possible with HTTP/2 multiplexing or retries within one millisecond) share an `entry_id`, and a capture tells them apart only by their order in the export.
 
 ## 10. Reporting to the user
 

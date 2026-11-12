@@ -40,4 +40,7 @@ class RecordingSnapshotResult(BaseModel):
     path: str | None = None
     items: list[dict[str, Any]]
     total_items: int
+    truncated: bool = False
+    # Pass as `offset` to read the next page; absent when this was the last one.
+    next_offset: int | None = None
     warnings: list[str] = Field(default_factory=list)

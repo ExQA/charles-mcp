@@ -349,6 +349,25 @@ class CharlesClient:
             logger.error("Failed to %s Charles tool %s: %s", action, tool, e)
             return False
 
+    async def get_tool_enabled(self, tool: str) -> bool | None:
+        """
+        Whether a Charles tool (e.g. ``map-remote``) is switched on.
+
+        The tool's Web Interface page says ``Status: Enabled`` or
+        ``Status: Disabled``. Returns None when Charles cannot be asked or the
+        page says neither, so a caller never mistakes "unknown" for "off".
+        """
+        try:
+            response = await self._get(f"/tools/{tool}/")
+        except CharlesClientError as e:
+            logger.debug("Cannot read the state of Charles tool %s: %s", tool, e)
+            return None
+        if "Status: Enabled" in response.text:
+            return True
+        if "Status: Disabled" in response.text:
+            return False
+        return None
+
     # ==================== Charles control ====================
 
     async def quit_charles(self, timeout: float = 3.0) -> bool:

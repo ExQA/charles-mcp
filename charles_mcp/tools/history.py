@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from mcp.server.fastmcp import FastMCP
 
 from charles_mcp.schemas.analysis import (
@@ -27,7 +29,46 @@ from charles_mcp.tools.tool_contract import (
     guidance_error_message,
     normalize_http_method,
     normalize_text_filter,
+    raw_body_preview,
+    summarize_raw_entry,
 )
+
+# A saved recording is a whole Charles session with every body in it. Returned
+# as it is, one call put 2.4 million characters into the agent's context for a
+# recording of 200 requests, so these tools answer with compact summaries and
+# say how much they left out.
+_MAX_RECORDING_ITEMS = 200
+
+
+def _compact_recorded_entry(
+    raw: dict[str, Any],
+    *,
+    entry_id: str,
+    keep_request: bool = False,
+    keep_response: bool = False,
+) -> dict[str, Any]:
+    """Routing fields of one recorded entry, its id, and short body previews on request."""
+    summary = summarize_raw_entry(raw)
+    summary["entry_id"] = entry_id
+    truncated = False
+    for wanted, side in ((keep_request, "request"), (keep_response, "response")):
+        if not wanted:
+            continue
+        preview, cut = raw_body_preview(raw.get(side))
+        if preview is not None:
+            summary[f"{side}_body_preview"] = preview
+            truncated = truncated or cut
+    if truncated:
+        summary["preview_truncated"] = True
+    if "_match_location" in raw:
+        summary["_match_location"] = raw["_match_location"]
+    return summary
+
+
+def _page_size(name: str, value: int) -> int:
+    if value < 1:
+        raise ValueError(f"`{name}` must be at least 1")
+    return min(value, _MAX_RECORDING_ITEMS)
 
 
 def register_history_tools(mcp: FastMCP) -> None:
@@ -212,12 +253,19 @@ def register_history_tools(mcp: FastMCP) -> None:
         keyword_regex: KeywordRegex = None,
         keep_request: bool = True,
         keep_response: bool = True,
+        max_items: int = 20,
     ) -> RecordedTrafficQueryResult:
         """Query the latest saved recording. This tool never reads the live Charles session.
         HISTORY-PLANE TOOL — only use when the user explicitly references a saved
         recording (.chlsj file). For ongoing / live traffic, prefer
-        start_live_capture + query_live_capture_entries instead."""
+        start_live_capture + query_live_capture_entries instead.
+        Returns compact summaries, at most max_items of them: route fields, an
+        entry_id, and with keep_request / keep_response the first 256 characters of
+        that body. total_items counts every match; truncated says more were left out.
+        For one whole entry pass its entry_id and the returned path as recording_path
+        to get_traffic_entry_detail(source="history")."""
         deps = get_tool_dependencies(ctx)
+        max_items = _page_size("max_items", max_items)
         host_contains_normalized = normalize_text_filter(host_contains)
         method_normalized, method_error = normalize_http_method(http_method)
         if method_error:
@@ -238,12 +286,26 @@ def register_history_tools(mcp: FastMCP) -> None:
                     )
                 )
 
-        return await deps.history_service.query_latest_result(
+        result = await deps.history_service.query_latest_result(
             host_contains=host_contains_normalized,
             method_normalized=method_normalized,
             keyword_regex=keyword_regex,
-            keep_request=keep_request,
-            keep_response=keep_response,
+        )
+        normalizer = deps.traffic_query_service.normalizer
+        items = [
+            _compact_recorded_entry(
+                raw,
+                entry_id=normalizer.entry_id_for(
+                    raw, capture_source="history", recording_path=result.path
+                ),
+                keep_request=keep_request,
+                keep_response=keep_response,
+            )
+            for raw in result.items[:max_items]
+            if isinstance(raw, dict)
+        ]
+        return result.model_copy(
+            update={"items": items, "truncated": result.total_items > len(items)}
         )
 
     @mcp.tool()
@@ -260,12 +322,39 @@ def register_history_tools(mcp: FastMCP) -> None:
     async def get_recording_snapshot(
         ctx: ToolContext,
         path: str | None = None,
+        offset: int = 0,
+        limit: int = 50,
     ) -> RecordingSnapshotResult:
-        """Load a saved recording snapshot. This tool never reads the live Charles session.
+        """List a saved recording snapshot. This tool never reads the live Charles session.
         HISTORY-PLANE TOOL — only use when the user explicitly references a saved
-        recording (.chlsj file)."""
+        recording (.chlsj file).
+        Returns compact entry summaries (host/method/path/status and an entry_id),
+        `limit` at a time from `offset`, never bodies: a recording is a whole session.
+        total_items is the size of the recording; next_offset continues the listing.
+        Use analyze_recorded_traffic to filter, and get_traffic_entry_detail
+        (source="history", recording_path, entry_id) for one whole entry."""
         deps = get_tool_dependencies(ctx)
+        if offset < 0:
+            raise ValueError("`offset` must not be negative")
+        limit = _page_size("limit", limit)
         try:
-            return await deps.history_service.get_snapshot_result(path)
+            result = await deps.history_service.get_snapshot_result(path)
         except Exception as exc:
             raise ValueError(str(exc)) from exc
+        normalizer = deps.traffic_query_service.normalizer
+        page = result.items[offset: offset + limit]
+        items = [
+            _compact_recorded_entry(
+                raw,
+                entry_id=normalizer.entry_id_for(
+                    raw, capture_source="history", recording_path=result.path
+                ),
+            )
+            for raw in page
+            if isinstance(raw, dict)
+        ]
+        end = offset + len(page)
+        more = end < result.total_items
+        return result.model_copy(
+            update={"items": items, "truncated": more, "next_offset": end if more else None}
+        )
