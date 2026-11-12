@@ -216,6 +216,7 @@ Verified on Charles 5.2.1: a host glob matches its subdomains, the path reaches 
 - Dispatcher: no WebSockets; downloads are buffered in full; gzip-compressed request bodies are not parsed; a JSON `true` does not equal a form `"true"` in matching; paths match exactly unless the rule uses `*` (`/users/1` ≠ `/users/2`).
 - No timeout or dropped-connection simulation: only `delay_ms` and the response code.
 - Only one live capture at a time.
+- Charles gives its entries no id. A request is identified by host, method, path, query, start time and the client's address and port. Two requests equal in all of these (possible with HTTP/2 multiplexing or retries within one millisecond) share an `entry_id`, and a capture tells them apart only by their order in the export.
 
 ## 10. Reporting to the user
 

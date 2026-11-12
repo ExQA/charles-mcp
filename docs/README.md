@@ -15,6 +15,7 @@ This page is the canonical documentation entrypoint for `charles-mcp`.
 - [Team Installation](./team-installation.md): installing this fork on another computer, security rules, troubleshooting
 - [Agent Workflow Guide](./agent-workflows.md): task-oriented workflow playbooks
 - [Tool Contract](./contracts/tools.md): canonical public tool surface and per-tool contract
+- [Changelog](../CHANGELOG.md): what changed between versions, behaviour changes first
 - [How it works](./how-it-works.uk.html): diagrams of traffic interception, the three response sources and rule anatomy, plus Kiro setup (Ukrainian, open it in a browser)
 
 ## Responsibility boundaries
