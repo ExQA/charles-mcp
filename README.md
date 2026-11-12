@@ -1,6 +1,6 @@
 # Charles MCP Server
 
-[![Версія](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D1%96%D1%8F-3.1.0rc1-0e7c76.svg)](docs/team-installation.uk.md)
+[![Версія](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D1%96%D1%8F-3.1.0rc2-0e7c76.svg)](docs/team-installation.uk.md)
 [![Ліцензія](https://img.shields.io/badge/%D0%BB%D1%96%D1%86%D0%B5%D0%BD%D0%B7%D1%96%D1%8F-MIT-0e7c76.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-0e7c76.svg)](pyproject.toml)
 [![Встановлення](https://img.shields.io/badge/%D0%B2%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%BD%D1%8F-%D0%B7%20%D0%B0%D1%80%D1%85%D1%96%D0%B2%D1%83%2C%20%D0%BD%D0%B5%20%D0%B7%20PyPI-c75300.svg)](docs/team-installation.uk.md)
