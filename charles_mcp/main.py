@@ -5,12 +5,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import sys
 import tempfile
+import threading
+from collections.abc import Callable, Coroutine
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from types import FrameType
+from typing import Any
 
-from charles_mcp.server import create_server
+from charles_mcp.server import SHUTDOWN_HOOK_ATTR, create_server
 from charles_mcp.utils import setup_logging, setup_windows_stdio
 
 
@@ -53,6 +58,40 @@ def selftest() -> int:
     return 0
 
 
+SIGTERM_CLEANUP_SECONDS = 5.0
+
+
+def _cleanup_on_sigterm(shutdown: Callable[[], Coroutine[Any, Any, None]]) -> None:
+    """Run the shutdown cleanup when the process is told to terminate.
+
+    The cleanup switches Map Remote off in Charles, so Charles stops sending
+    routed traffic to the dispatcher that dies with this process. By default
+    SIGTERM ends the process on the spot and nothing runs; turning it into an
+    exception does not work either: the event loop is torn down while the
+    request to Charles is still on its way, and the process then hangs on the
+    thread that reads stdin. So the cleanup runs here, on its own loop in its
+    own thread, for a bounded time, and then the process dies of the same
+    signal as it would have.
+    """
+
+    def handler(signum: int, frame: FrameType | None) -> None:
+        logger = logging.getLogger(__name__)
+        logger.info("signal %s received; cleaning up before exit", signum)
+        worker = threading.Thread(target=lambda: asyncio.run(shutdown()), daemon=True)
+        worker.start()
+        worker.join(SIGTERM_CLEANUP_SECONDS)
+        if worker.is_alive():
+            logger.warning("cleanup did not finish in %s s", SIGTERM_CLEANUP_SECONDS)
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    try:
+        signal.signal(signal.SIGTERM, handler)
+    except (AttributeError, OSError, ValueError):
+        # No SIGTERM on this platform, or not the main thread: nothing to do.
+        pass
+
+
 def main() -> None:
     """Start the Charles MCP server over stdio."""
     arguments = sys.argv[1:]
@@ -75,6 +114,9 @@ def main() -> None:
 
     try:
         server = create_server()
+        shutdown = getattr(server, SHUTDOWN_HOOK_ATTR, None)
+        if shutdown is not None:
+            _cleanup_on_sigterm(shutdown)
         logger.info("calling mcp.run()...")
         server.run(transport="stdio")
     except Exception as exc:

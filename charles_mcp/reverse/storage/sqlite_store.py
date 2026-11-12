@@ -304,6 +304,33 @@ class SQLiteStore:
                 ),
             )
 
+    def delete_capture(self, capture_id: str) -> bool:
+        """Remove a capture and everything stored for it; True when it existed.
+
+        Entries, requests, responses and replay experiments go with the capture
+        by cascade. Bodies are only unlinked by that, so the ones no request or
+        response refers to any more are removed here: they are the captured
+        payloads, the part that must not outlive the capture.
+        """
+        with self.transaction() as conn:
+            removed = conn.execute(
+                "DELETE FROM captures WHERE capture_id = ?", (capture_id,)
+            ).rowcount
+            if removed:
+                conn.execute(
+                    """
+                    DELETE FROM body_blobs WHERE body_blob_id NOT IN (
+                        SELECT body_blob_id FROM requests WHERE body_blob_id IS NOT NULL
+                        UNION
+                        SELECT body_blob_id FROM responses WHERE body_blob_id IS NOT NULL
+                        UNION
+                        SELECT response_body_blob_id FROM runs
+                        WHERE response_body_blob_id IS NOT NULL
+                    )
+                    """
+                )
+        return bool(removed)
+
     def upsert_body_blob(self, body_blob: BodyBlob) -> None:
         with self.transaction() as conn:
             conn.execute(

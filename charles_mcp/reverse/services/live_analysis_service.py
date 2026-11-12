@@ -109,7 +109,13 @@ class LiveAnalysisService:
         state.latest_capture_id = imported["capture_id"]
         state.snapshot_capture_ids.append(imported["capture_id"])
         if len(state.snapshot_capture_ids) > self.snapshot_history_limit:
+            # Every read stores the whole Charles session again. Forgetting the
+            # id of an old snapshot left its copy of the traffic in the database
+            # for good, so the snapshot goes together with its place in the list.
+            dropped = state.snapshot_capture_ids[: -self.snapshot_history_limit]
             state.snapshot_capture_ids = state.snapshot_capture_ids[-self.snapshot_history_limit :]
+            for capture_id in dropped:
+                self.query_service.store.delete_capture(capture_id)
 
         current_transaction_count = self.query_service.store.count_entries(
             capture_id=imported["capture_id"],
@@ -218,11 +224,16 @@ class LiveAnalysisService:
         else:
             raise ValueError("live snapshot supports only xml or native")
 
-        return self.ingest_service.import_session(
-            path=str(path),
-            source_format=snapshot_format,
-            source_kind=CaptureSourceKind.LIVE_SNAPSHOT,
-        )
+        try:
+            return self.ingest_service.import_session(
+                path=str(path),
+                source_format=snapshot_format,
+                source_kind=CaptureSourceKind.LIVE_SNAPSHOT,
+            )
+        finally:
+            # The export is the whole session in plain text. Once it is in the
+            # database the file has no reader, and nothing else ever removed it.
+            path.unlink(missing_ok=True)
 
 
 def _count_non_control_transactions(xml: str) -> int:

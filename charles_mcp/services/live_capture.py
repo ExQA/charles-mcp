@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 
 from charles_mcp.client import CharlesClient, CharlesClientError
 from charles_mcp.config import Config
@@ -20,6 +21,9 @@ from charles_mcp.utils import ensure_directory
 logger = logging.getLogger(__name__)
 
 STOP_RETRY_DELAY_SECONDS = 0.25
+# An export this slow is worth telling the agent about: every tool call that
+# reads the session pays for it again.
+SLOW_EXPORT_SECONDS = 5.0
 
 
 class LiveCaptureService:
@@ -36,6 +40,8 @@ class LiveCaptureService:
         self.client_factory = client_factory
         self.live_manager = live_manager or LiveCaptureManager()
         self._shared_client: CharlesClient | None = None
+        self.slow_export_seconds = SLOW_EXPORT_SECONDS
+        self._last_export_seconds = 0.0
 
     async def _get_shared_client(self) -> CharlesClient:
         """Return the reusable client, creating it on first access."""
@@ -69,8 +75,11 @@ class LiveCaptureService:
         baseline_items: list[dict] = []
 
         client = await self._get_shared_client()
+        self._last_export_seconds = 0.0
+        started = time.monotonic()
         if effective_adopt:
             baseline_items = await client.export_session_json()
+            self._last_export_seconds = time.monotonic() - started
             # The user's existing session is the source of truth. We do not
             # clear it. start_recording is idempotent — call it only when the
             # caller wants us to ensure Charles is actively recording.
@@ -79,6 +88,7 @@ class LiveCaptureService:
         else:
             if not reset_session:
                 baseline_items = await client.export_session_json()
+                self._last_export_seconds = time.monotonic() - started
             if reset_session and not await client.clear_session():
                 raise CharlesClientError("failed to clear current Charles session")
             if not await client.start_recording():
@@ -91,6 +101,8 @@ class LiveCaptureService:
             include_existing=True,
             baseline_items=baseline_items,
         )
+        if warning := self._slow_export_warning(len(baseline_items)):
+            capture.warnings.append(warning)
 
         return LiveCaptureStartResult(
             capture_id=capture.capture_id,
@@ -109,12 +121,35 @@ class LiveCaptureService:
         advance: bool = True,
     ) -> LiveCaptureReadResult:
         raw_items = await self.export_current_session()
-        return self.live_manager.read(
+        result = self.live_manager.read(
             capture_id,
             raw_items,
             cursor=cursor,
             limit=limit,
             advance=advance,
+        )
+        if warning := self._slow_export_warning(len(raw_items)):
+            result.warnings.append(warning)
+        return result
+
+    def known_entries(self, capture_id: str) -> list[dict]:
+        """The capture's entries as of the last export, without asking Charles again.
+
+        A finished request does not change, so a caller that only needs one of
+        those can take it from here and save a whole session export.
+        """
+        return self.live_manager.require(capture_id).items
+
+    def _slow_export_warning(self, entry_count: int) -> str | None:
+        seconds = self._last_export_seconds
+        if seconds < self.slow_export_seconds:
+            return None
+        return (
+            f"slow_export: Charles took {seconds:.0f} s to export the session ({entry_count} "
+            "entries), and every call that reads traffic exports it again. Ask the user to "
+            "clear the Charles session once the current flow is saved, and to turn off "
+            "Proxy > macOS Proxy when only a device is tested: it records all traffic of "
+            "this computer."
         )
 
     async def stop(
@@ -170,6 +205,7 @@ class LiveCaptureService:
         )
 
     async def export_current_session(self) -> list[dict]:
+        started = time.monotonic()
         try:
             client = await self._get_shared_client()
             return await client.export_session_json()
@@ -178,6 +214,8 @@ class LiveCaptureService:
             await self._close_shared_client()
             client = await self._get_shared_client()
             return await client.export_session_json()
+        finally:
+            self._last_export_seconds = time.monotonic() - started
 
     def save_capture_items(self, path: str, data: list[dict]) -> str:
         ensure_directory(os.path.dirname(path) or self.config.package_dir)

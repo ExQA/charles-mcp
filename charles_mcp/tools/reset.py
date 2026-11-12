@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from datetime import datetime
 
 from mcp.server.fastmcp import FastMCP
 
@@ -18,6 +20,7 @@ from charles_mcp.tools.tool_contract import (
     get_tool_dependencies,
     safe_ctx_log,
 )
+from charles_mcp.utils import list_files_with_extension
 
 logger = logging.getLogger(__name__)
 
@@ -57,22 +60,54 @@ def register_reset_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def reset_environment(ctx: ToolContext) -> str:
-        """Reset the Charles environment and restore the saved configuration."""
+        """Quit Charles, put back the Charles config saved when this server started,
+        and delete every saved recording.
+        DESTRUCTIVE and not undoable: the unsaved Charles session is lost when Charles
+        quits, the current Charles settings are overwritten by the saved copy, and all
+        .chlsj recordings this server stored are removed. Call it only when the user
+        asks for exactly this reset; it does not start Charles again.
+        The saved copy exists only when the server manages Charles
+        (CHARLES_MANAGE_LIFECYCLE=true). Without one there is nothing to restore, and
+        the tool changes nothing and says so. To stop mocks use mock_dispatcher(stop)
+        or mock_set_enabled(false); to remove old data use purge_stored_data."""
         deps = get_tool_dependencies(ctx)
+        config = deps.config
+        baseline = os.path.join(config.backup_dir, "config", "charles.config")
+        recordings = len(list_files_with_extension(config.package_dir, ".chlsj"))
+        if not os.path.isfile(baseline):
+            # Without a baseline the "reset" is only its side effects: Charles
+            # quits, the session is lost and the recordings are deleted, and
+            # nothing is restored. That is never what was asked for.
+            return (
+                "Nothing was changed: there is no saved Charles configuration to restore. "
+                "The server saves one at start only when it manages Charles "
+                "(CHARLES_MANAGE_LIFECYCLE=true). A reset now would only quit Charles, lose "
+                f"its unsaved session and delete {recordings} saved recording(s). To stop "
+                "mocks use mock_dispatcher(action=\"stop\") or mock_set_enabled(false); to "
+                "remove stored data use purge_stored_data."
+            )
+
+        saved_at = datetime.fromtimestamp(os.path.getmtime(baseline)).strftime("%Y-%m-%d %H:%M")
         await safe_ctx_log(ctx, "info", "Running manual environment reset...")
         try:
-            await deps.restore_config_fn(deps.config)
-            return "Environment reset completed"
+            await deps.restore_config_fn(config)
         except Exception as exc:
             logger.error("Reset environment failed: %s", exc)
             return f"Reset failed: {exc}"
+        return (
+            "Environment reset completed: Charles was asked to quit, its config was restored "
+            f"from the copy saved {saved_at}, and {recordings} saved recording(s) were deleted. "
+            "Charles is not started again; ask the user to start it."
+        )
 
     @mcp.tool()
     async def charles_status(ctx: ToolContext) -> CharlesStatusResult:
         """Check Charles connectivity and active live-capture state.
         Returns recommended_next_action to nudge agents toward the live plane:
         when no active capture exists, agents should start_live_capture before
-        falling back to history-plane tools."""
+        falling back to history-plane tools. `warnings` lists what is broken
+        right now, e.g. Map Remote left on with no dispatcher running: tell the
+        user and fix it before anything else."""
         logger.info("Tool called: charles_status()")
         deps = get_tool_dependencies(ctx)
 
@@ -103,6 +138,12 @@ def register_reset_tools(mcp: FastMCP) -> None:
             status_code = getattr(exc, "status_code", None)
             if status_code in (401, 403):
                 rejected_status = status_code
+
+        if result.connected and deps.routing_warnings_fn is not None:
+            try:
+                result.warnings = await deps.routing_warnings_fn()
+            except Exception as exc:  # never let a side check break the status call
+                logger.debug("routing check failed: %s", exc)
 
         if not result.connected and rejected_status is not None:
             # Charles is up and answered; only the credentials are wrong. Saying

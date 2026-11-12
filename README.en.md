@@ -45,6 +45,11 @@ Settings dialog:
 
 ![Charles Web Interface Settings](docs/images/charles-web-interface-settings.png)
 
+Two more Charles settings, both made once:
+
+- **Exclude the server's own requests from recording.** Open `Proxy -> Recording Settings -> Exclude`, press `Add` and set Host to `control.charles`, leaving the other fields empty. It takes effect at once, no restart. Every tool call exports the session through the Charles proxy; without this exclusion Charles records each export with the whole session as its body, so the session grows on every call (100 KB to 2 GB in one test run) and the tools slow to tens of seconds. The server warns with `charles_records_own_exports` when it sees this.
+- **Enable SSL Proxying for the hosts you want to read.** Open `Proxy -> SSL Proxying Settings`, add the API host, and make sure the device trusts the Charles root certificate. Without it Charles records an HTTPS connection as one opaque tunnel, and the tools have no paths or bodies to show; they say so with an `ssl_proxying_off` warning.
+
 ### 2. Install and configure your MCP client
 
 > **Never install this fork from a registry.** The `charles-mcp` package on PyPI is upstream 3.0.3: it has no mock tools and, without the `mcp<2` pin, fails at start with `ModuleNotFoundError: mcp.server.fastmcp`. So `uvx charles-mcp` and `pip install charles-mcp` give you a server that is missing half the tools, and the failure never names its cause. Install from this repository or from the offline archive — see [docs/team-installation.md](docs/team-installation.md).
@@ -333,7 +338,7 @@ This README documents the whole public tool surface.
 | Tool | What it does | Typical use |
 | --- | --- | --- |
 | `list_recordings` | Lists saved recording files | Before choosing a historical snapshot |
-| `get_recording_snapshot` | Loads the raw content of one saved recording | When you need the stored snapshot itself |
+| `get_recording_snapshot` | Lists one saved recording as compact summaries, a page at a time, without bodies | When you need to see what a stored snapshot holds |
 | `query_recorded_traffic` | Applies lightweight filtering to the latest saved recording | When you need a quick host, method, or regex query |
 
 ### Status and control tools

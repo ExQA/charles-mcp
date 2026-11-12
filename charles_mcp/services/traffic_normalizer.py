@@ -112,6 +112,26 @@ class TrafficNormalizer:
             response=response_message,
         )
 
+    def entry_id_for(
+        self,
+        raw_entry: dict[str, Any],
+        *,
+        capture_source: CaptureSource,
+        capture_id: str | None = None,
+        recording_path: str | None = None,
+    ) -> str:
+        """The entry_id ``normalize_entry`` would give this raw entry.
+
+        It only hashes routing fields, so a caller looking for one entry can
+        find it without normalizing — and parsing the bodies of — all the others.
+        """
+        return self._build_entry_id(
+            raw_entry,
+            capture_source=capture_source,
+            capture_id=capture_id,
+            recording_path=recording_path,
+        )
+
     def _build_entry_id(
         self,
         raw_entry: dict[str, Any],
@@ -120,9 +140,16 @@ class TrafficNormalizer:
         capture_id: str | None,
         recording_path: str | None,
     ) -> str:
-        """Build a lightweight fingerprint from key routing fields."""
+        """Build a lightweight fingerprint from the fields that identify a request.
+
+        Only what stays the same while Charles records the request goes in:
+        where it went, when it started and which client connection it came
+        from. Status, sizes and the response are left out on purpose — with
+        them the id of a request listed while it was still in flight changed
+        the moment it completed, and the id an agent had just been given no
+        longer found anything.
+        """
         times = raw_entry.get("times") or {}
-        response = raw_entry.get("response") or {}
         components = [
             capture_source,
             capture_id or "",
@@ -131,10 +158,8 @@ class TrafficNormalizer:
             str(raw_entry.get("method") or ""),
             str(raw_entry.get("path") or ""),
             str(raw_entry.get("query") or ""),
-            str(raw_entry.get("status") or ""),
-            str(response.get("status") or ""),
             str(times.get("start") or ""),
-            str(times.get("end") or ""),
-            str(raw_entry.get("totalSize") or ""),
+            str(raw_entry.get("clientAddress") or ""),
+            str(raw_entry.get("clientPort") or ""),
         ]
         return sha1("|".join(components).encode("utf-8")).hexdigest()

@@ -108,8 +108,8 @@ This document covers the canonical public tools only.
 | Tool | Contract |
 | --- | --- |
 | `list_recordings` | Lists the available recordings |
-| `get_recording_snapshot` | Returns the raw snapshot of one recording |
-| `query_recorded_traffic` | Lightweight filtering of the latest saved recording |
+| `get_recording_snapshot` | Lists one recording as compact summaries with `entry_id`, `limit` at a time from `offset`; never bodies |
+| `query_recorded_traffic` | Lightweight filtering of the latest saved recording; at most `max_items` compact summaries with short body previews |
 | `analyze_recorded_traffic` | Structured summary of a given recording or the latest one |
 
 ### Shared analysis tools

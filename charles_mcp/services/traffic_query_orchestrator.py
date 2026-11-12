@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import sys
 from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from hashlib import sha1
-from typing import cast
+from typing import TypeVar, cast
 
 from charles_mcp.analyzers.resource_classifier import classify_entry
+from charles_mcp.live_state import is_final_status
 from charles_mcp.schemas.analysis import TrafficDetailResult, TrafficQueryResult
 from charles_mcp.schemas.traffic import (
     CaptureSource,
@@ -21,10 +26,91 @@ from charles_mcp.services.traffic_cache import SUMMARY_BODY_MODE, TrafficEntryCa
 from charles_mcp.services.traffic_normalizer import TrafficNormalizer
 from charles_mcp.services.traffic_query_models import PreparedTrafficEntries
 
-# Cached normalize/classify result. entry=None means the raw entry was
-# excluded by the preset and never normalized; we still cache the
-# classification so subsequent passes do not re-run classify_entry.
+# Cached classify/normalize result for one raw entry. entry=None means the
+# entry has been classified but not normalized yet: it was outside the scan
+# limit, ruled out by a raw filter, or excluded by the preset of that call.
+# Whether an entry is excluded is decided on every call from the cached
+# classification, never from the cached entry, so presets cannot leak into
+# each other.
 _NormalizeCacheValue = tuple[ResourceClassification, TrafficEntry | None]
+
+# A live read with no upper bound. Analysis looks at the whole capture and
+# decides itself which entries are worth normalizing.
+READ_ALL = sys.maxsize
+
+_T = TypeVar("_T")
+
+
+def entry_start_timestamp(raw_entry: dict) -> float | None:
+    """When Charles started recording this entry, as a POSIX timestamp.
+
+    None when ``times.start`` is missing or unparseable. A naive timestamp is
+    read as UTC, which matches Charles' default export format.
+    """
+    times = raw_entry.get("times")
+    start_value = times.get("start") if isinstance(times, dict) else None
+    if not isinstance(start_value, str) or not start_value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(start_value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def keep_newest(items: list[_T], limit: int, *, raw_of: Callable[[_T], dict]) -> list[_T]:
+    """The ``limit`` most recently started items, in their original order.
+
+    Charles exports a session in start order, but a live capture appends
+    entries as it discovers them, so position alone is not a safe proxy for
+    age. Entries without a parseable start time count as newest: they are
+    usually requests still in flight.
+    """
+    if len(items) <= limit:
+        return items
+
+    def rank(index: int) -> tuple[float, int]:
+        started = entry_start_timestamp(raw_of(items[index]))
+        return (float("inf") if started is None else started, index)
+
+    keep = sorted(sorted(range(len(items)), key=rank)[-limit:])
+    return [items[index] for index in keep]
+
+
+@dataclass(frozen=True)
+class _RawFilter:
+    """The host, path and method filters of a query, applied to raw Charles entries.
+
+    They mirror TrafficAnalysisService.match_entry exactly, so an entry dropped
+    here could never have matched. Checking them before normalization lets the
+    scan limit go to entries that still can.
+    """
+
+    host: str | None
+    path: str | None
+    methods: frozenset[str]
+
+    @classmethod
+    def from_query(cls, query: TrafficQuery) -> _RawFilter:
+        return cls(
+            host=query.host_contains.lower() if query.host_contains else None,
+            path=query.path_contains.lower() if query.path_contains else None,
+            methods=frozenset(item.upper() for item in query.method_in),
+        )
+
+    def host_matches(self, raw_entry: dict) -> bool:
+        return self.host is None or self.host in str(raw_entry.get("host") or "").lower()
+
+    def matches(self, raw_entry: dict) -> bool:
+        if not self.host_matches(raw_entry):
+            return False
+        if self.path is not None and self.path not in str(raw_entry.get("path") or "").lower():
+            return False
+        if self.methods and str(raw_entry.get("method") or "").upper() not in self.methods:
+            return False
+        return True
 
 
 class TrafficQueryOrchestrator:
@@ -71,7 +157,6 @@ class TrafficQueryOrchestrator:
             capture_id=capture_id,
             cursor=cursor,
             advance=False,
-            read_limit=query.scan_limit,
         )
         return self.build_query_result(prepared=prepared, query=query, include_items=True)
 
@@ -110,15 +195,17 @@ class TrafficQueryOrchestrator:
         recording_path: str | None = None,
         cursor: int | None = None,
         advance: bool = False,
-        read_limit: int | None = None,
     ) -> PreparedTrafficEntries:
         if source == "live":
             if not capture_id:
                 raise ValueError("capture_id is required for live analysis")
+            # Read every entry from the cursor on. The scan limit is applied in
+            # _prepare_entries, after the cheap filters, so it keeps the newest
+            # candidates instead of whatever the session happened to start with.
             live_result = await self.live_service.read(
                 capture_id,
                 cursor=cursor if cursor is not None else 0,
-                limit=read_limit or query.scan_limit,
+                limit=READ_ALL,
                 advance=advance,
             )
             return self._prepare_entries(
@@ -128,7 +215,6 @@ class TrafficQueryOrchestrator:
                 capture_id=capture_id,
                 next_cursor=live_result.next_cursor,
                 total_items=live_result.total_new_items,
-                already_truncated=live_result.truncated,
                 initial_warnings=list(live_result.warnings),
             )
 
@@ -208,26 +294,26 @@ class TrafficQueryOrchestrator:
             entry_id=entry_id,
             body_mode=body_mode,
         )
+        if entry is not None and not is_final_status(entry.status):
+            # Cached while the request was still in flight: its response may
+            # have arrived since, so look again instead of serving half of it.
+            entry = None
 
-        if entry is None and body_mode != SUMMARY_BODY_MODE:
+        if entry is None:
             entry = await self._hydrate_and_cache_entry(
                 source=source,
                 identity=identity,
                 entry_id=entry_id,
+                include_full_body=include_full_body,
                 max_body_chars=max_body_chars,
             )
 
         if entry is None:
-            await self.cache_summary_scope(source=source, identity=identity)
-            entry = self.entry_cache.get_entry(
-                source=source,
-                identity=identity,
-                entry_id=entry_id,
-                body_mode=SUMMARY_BODY_MODE,
+            raise ValueError(
+                f"traffic entry `{entry_id}` was not found in `{identity}`. An entry_id changes "
+                "when a request that was still in flight completes; query the capture again "
+                "and use the id it returns now."
             )
-
-        if entry is None:
-            raise ValueError(f"traffic entry `{entry_id}` was not found in `{identity}`")
 
         detail = self.analysis_service.build_detail(entry)
         warnings: list[str] = []
@@ -244,80 +330,131 @@ class TrafficQueryOrchestrator:
             warnings=warnings,
         )
 
-    async def cache_summary_scope(self, *, source: CaptureSource, identity: str) -> None:
-        if source == "history":
-            raw_entries = await self.history_service.get_snapshot(identity)
-            self._prepare_entries(
-                source="history",
-                raw_entries=raw_entries,
-                query=TrafficQuery(preset="all_http", max_items=200, scan_limit=2000),
-                recording_path=identity,
-            )
-            return
-
-        live_result = await self.live_service.read(
-            identity,
-            cursor=0,
-            limit=500,
-            advance=False,
-        )
-        self._prepare_entries(
-            source="live",
-            raw_entries=live_result.items,
-            query=TrafficQuery(preset="all_http", max_items=200, scan_limit=2000),
-            capture_id=identity,
-            next_cursor=live_result.next_cursor,
-            initial_warnings=list(live_result.warnings),
-        )
-
     async def _hydrate_and_cache_entry(
         self,
         *,
         source: CaptureSource,
         identity: str,
         entry_id: str,
+        include_full_body: bool,
         max_body_chars: int,
     ) -> TrafficEntry | None:
+        """Find one entry by id anywhere in the capture or recording.
+
+        The id is computed from routing fields alone, so only the entry that
+        matches is normalized; the bodies of all the others are never parsed.
+        """
+        capture_id: str | None
+        recording_path: str | None
         if source == "history":
-            raw_entries = await self.history_service.get_snapshot(identity)
             capture_id = None
             recording_path = identity
-        else:
-            live_result = await self.live_service.read(
-                identity,
-                cursor=0,
-                limit=500,
-                advance=False,
+            raw = self._find_raw_entry(
+                await self.history_service.get_snapshot(identity),
+                source=source,
+                capture_id=capture_id,
+                recording_path=recording_path,
+                entry_id=entry_id,
             )
-            raw_entries = live_result.items
+        else:
             capture_id = identity
             recording_path = None
+            # A finished request does not change any more, so the copy from the
+            # last export is as good as a new one — and a new one costs a whole
+            # session export, tens of seconds on a long session.
+            raw = self._find_raw_entry(
+                self._known_live_entries(identity),
+                source=source,
+                capture_id=capture_id,
+                recording_path=recording_path,
+                entry_id=entry_id,
+            )
+            if raw is None or not is_final_status(raw.get("status")):
+                live_result = await self.live_service.read(
+                    identity,
+                    cursor=0,
+                    limit=READ_ALL,
+                    advance=False,
+                )
+                raw = self._find_raw_entry(
+                    live_result.items,
+                    source=source,
+                    capture_id=capture_id,
+                    recording_path=recording_path,
+                    entry_id=entry_id,
+                )
 
+        if raw is not None:
+            classification = classify_entry(raw)
+            if include_full_body:
+                hydrated = self.normalizer.normalize_entry(
+                    raw,
+                    capture_source=source,
+                    capture_id=capture_id,
+                    recording_path=recording_path,
+                    include_full_body=True,
+                    max_preview_chars=min(max_body_chars, 1024),
+                    max_headers_per_side=16,
+                    max_full_body_chars=max_body_chars,
+                    classification=classification,
+                )
+                # One entry per full-body scope: a hydrated body can be large,
+                # and the next lookup with this body size replaces it.
+                self.entry_cache.put(
+                    source=source,
+                    identity=identity,
+                    body_mode=self._body_mode(include_full_body=True, max_body_chars=max_body_chars),
+                    entries={entry_id: hydrated},
+                )
+            else:
+                hydrated = self.normalizer.normalize_entry(
+                    raw,
+                    capture_source=source,
+                    capture_id=capture_id,
+                    recording_path=recording_path,
+                    classification=classification,
+                )
+                self.entry_cache.add_entry(
+                    source=source,
+                    identity=identity,
+                    body_mode=SUMMARY_BODY_MODE,
+                    entry=hydrated,
+                )
+            return hydrated
+
+        return None
+
+    def _known_live_entries(self, capture_id: str) -> list[dict]:
+        """What the live service already holds for the capture; empty if it cannot say."""
+        known = getattr(self.live_service, "known_entries", None)
+        if known is None:
+            return []
+        try:
+            return list(known(capture_id))
+        except Exception:
+            # An unknown capture is reported by the read that follows, with its own error.
+            return []
+
+    def _find_raw_entry(
+        self,
+        raw_entries: list[dict],
+        *,
+        source: CaptureSource,
+        capture_id: str | None,
+        recording_path: str | None,
+        entry_id: str,
+    ) -> dict | None:
         for raw in raw_entries:
             if not isinstance(raw, dict):
                 continue
-            classification = classify_entry(raw)
-            hydrated = self.normalizer.normalize_entry(
+            candidate_id = self.normalizer.entry_id_for(
                 raw,
                 capture_source=source,
                 capture_id=capture_id,
                 recording_path=recording_path,
-                include_full_body=True,
-                max_preview_chars=min(max_body_chars, 1024),
-                max_headers_per_side=16,
-                max_full_body_chars=max_body_chars,
-                classification=classification,
             )
-            if hydrated.entry_id != entry_id:
-                continue
-            self.entry_cache.put(
-                source=source,
-                identity=identity,
-                body_mode=self._body_mode(include_full_body=True, max_body_chars=max_body_chars),
-                entries={entry_id: hydrated},
-            )
-            return hydrated
-
+            if candidate_id == entry_id:
+                return raw
         return None
 
     async def _load_history_entries(self, recording_path: str | None) -> tuple[str, list[dict]]:
@@ -359,25 +496,10 @@ class TrafficQueryOrchestrator:
         recording_path: str | None = None,
         next_cursor: int | None = None,
         total_items: int | None = None,
-        already_truncated: bool = False,
         initial_warnings: list[str] | None = None,
     ) -> PreparedTrafficEntries:
         warnings = list(initial_warnings or [])
         total_items = total_items if total_items is not None else len(raw_entries)
-        # since_seconds: apply BEFORE scan_limit so the window decides what to
-        # consider, not the buffer slice. When unset the fast path leaves
-        # raw_entries untouched and pays zero overhead.
-        if query.since_seconds is not None:
-            window_filtered = self._filter_by_since_seconds(
-                raw_entries, since_seconds=query.since_seconds
-            )
-            scanned_entries = window_filtered[: query.scan_limit]
-            truncated = already_truncated or len(window_filtered) > query.scan_limit
-        else:
-            scanned_entries = raw_entries[: query.scan_limit]
-            truncated = already_truncated or total_items > query.scan_limit
-        if truncated:
-            warnings.append("scan_limit_reached")
 
         # errors_only preset: inject has_error filter so only error traffic matches
         effective_query = query
@@ -386,11 +508,6 @@ class TrafficQueryOrchestrator:
         needs_body_search = bool(
             effective_query.request_body_contains or effective_query.response_body_contains
         )
-
-        filtered_out_by_class: Counter[ResourceClass] = Counter()
-        classified_counts: Counter[ResourceClass] = Counter()
-        matched_entries: list[tuple[TrafficEntry, TrafficMatch]] = []
-        detail_entries: dict[str, TrafficEntry] = {}
 
         identity = capture_id if source == "live" else recording_path
         scope_key = self._normalize_scope_key(
@@ -405,7 +522,26 @@ class TrafficQueryOrchestrator:
         )
         seen_hashes: set[str] = set()
 
-        for raw in scanned_entries:
+        filtered_out_by_class: Counter[ResourceClass] = Counter()
+        classified_counts: Counter[ResourceClass] = Counter()
+
+        # Pass 1, cheap, over every entry. The time window, the preset's noise
+        # classes and the host/path/method filters need only raw routing
+        # fields. Deciding them here, before the scan limit, spends the limit
+        # on entries that can still match instead of on whatever came first:
+        # a long session used to hide its newest traffic behind the limit.
+        window_start = (
+            datetime.now(timezone.utc).timestamp() - query.since_seconds
+            if query.since_seconds is not None
+            else None
+        )
+        raw_filter = _RawFilter.from_query(effective_query)
+        scanned_count = 0
+        tunnels_in_scope = 0
+        readable_in_scope = 0
+        candidates: list[tuple[dict, str, ResourceClassification]] = []
+
+        for raw in raw_entries:
             if not isinstance(raw, dict):
                 continue
 
@@ -413,40 +549,72 @@ class TrafficQueryOrchestrator:
             if scope_cache is not None:
                 seen_hashes.add(raw_hash)
 
+            if window_start is not None and not self._started_since(raw, window_start):
+                continue
+            scanned_count += 1
+
             cached = scope_cache.get(raw_hash) if scope_cache is not None else None
             if cached is not None:
-                classification, entry = cached
-                self.normalize_cache_stats["hits"] += 1
+                classification = cached[0]
             else:
                 classification = classify_entry(raw)
-                if self._excluded_by_preset(classification.resource_class, effective_query):
-                    entry = None
-                else:
-                    entry = self.normalizer.normalize_entry(
-                        raw,
-                        capture_source=source,
-                        capture_id=capture_id,
-                        recording_path=recording_path,
-                        include_full_body=needs_body_search,
-                        max_preview_chars=effective_query.max_preview_chars,
-                        max_headers_per_side=effective_query.max_headers_per_side,
-                        max_full_body_chars=(
-                            self._body_match_chars(raw) if needs_body_search else 4096
-                        ),
-                        classification=classification,
-                    )
+                if scope_cache is not None:
+                    scope_cache[raw_hash] = (classification, None)
+            classified_counts[classification.resource_class] += 1
+            if raw_filter.host_matches(raw):
+                if classification.resource_class == "connect_tunnel":
+                    tunnels_in_scope += 1
+                elif classification.resource_class != "control":
+                    readable_in_scope += 1
+
+            if self._excluded_by_preset(classification.resource_class, effective_query):
+                filtered_out_by_class[classification.resource_class] += 1
+                continue
+            if not raw_filter.matches(raw):
+                continue
+            candidates.append((raw, raw_hash, classification))
+
+        if tunnels_in_scope and not readable_in_scope:
+            warnings.append(self._ssl_proxying_hint(tunnels_in_scope, effective_query))
+
+        truncated = len(candidates) > query.scan_limit
+        if truncated:
+            warnings.append("scan_limit_reached")
+            warnings.append(
+                f"analysed the newest {query.scan_limit} of {len(candidates)} candidate entries; "
+                "narrow with since_seconds, host_contains or path_contains, or raise scan_limit"
+            )
+            candidates = keep_newest(candidates, query.scan_limit, raw_of=lambda item: item[0])
+
+        # Pass 2: normalize and match what is left.
+        matched_entries: list[tuple[TrafficEntry, TrafficMatch]] = []
+        detail_entries: dict[str, TrafficEntry] = {}
+
+        for raw, raw_hash, classification in candidates:
+            cached = scope_cache.get(raw_hash) if scope_cache is not None else None
+            entry = cached[1] if cached is not None else None
+            if entry is not None:
+                self.normalize_cache_stats["hits"] += 1
+            else:
+                entry = self.normalizer.normalize_entry(
+                    raw,
+                    capture_source=source,
+                    capture_id=capture_id,
+                    recording_path=recording_path,
+                    include_full_body=needs_body_search,
+                    max_preview_chars=effective_query.max_preview_chars,
+                    max_headers_per_side=effective_query.max_headers_per_side,
+                    max_full_body_chars=(
+                        self._body_match_chars(raw) if needs_body_search else 4096
+                    ),
+                    classification=classification,
+                )
                 if scope_cache is not None:
                     # Cache the entry with full body intact so subsequent
                     # body_contains matches can still see it. The compact
                     # form is only used for downstream storage, not matching.
                     scope_cache[raw_hash] = (classification, entry)
                 self.normalize_cache_stats["misses"] += 1
-
-            classified_counts[classification.resource_class] += 1
-
-            if entry is None:
-                filtered_out_by_class[classification.resource_class] += 1
-                continue
 
             match = self.analysis_service.match_entry(entry, effective_query)
             storage_entry = (
@@ -457,6 +625,8 @@ class TrafficQueryOrchestrator:
                 matched_entries.append((storage_entry, match))
 
         if scope_cache is not None:
+            # Only entries that left the capture are dropped; an entry outside
+            # this call's time window is still there and keeps its cached value.
             stale_hashes = set(scope_cache.keys()) - seen_hashes
             for stale_hash in stale_hashes:
                 scope_cache.pop(stale_hash, None)
@@ -474,7 +644,7 @@ class TrafficQueryOrchestrator:
             source=source,
             identity=identity,
             total_items=total_items,
-            scanned_count=len(scanned_entries),
+            scanned_count=scanned_count,
             matched_count=len(matched_entries),
             filtered_out_count=sum(filtered_out_by_class.values()),
             filtered_out_by_class=dict(filtered_out_by_class),
@@ -491,40 +661,35 @@ class TrafficQueryOrchestrator:
         return f"full:{max_body_chars}"
 
     @staticmethod
-    def _filter_by_since_seconds(
-        raw_entries: list[dict],
-        *,
-        since_seconds: int,
-    ) -> list[dict]:
-        """Return entries whose times.start falls within the trailing window.
+    def _ssl_proxying_hint(tunnel_count: int, query: TrafficQuery) -> str:
+        """Explain an empty result that is really a Charles setup problem.
+
+        Without SSL Proxying Charles records an HTTPS connection as one opaque
+        CONNECT tunnel: no path, no status, no body. Every filter then comes
+        back empty, which reads as "the app sent nothing" unless it is said.
+        """
+        scope = (
+            f"hosts matching `{query.host_contains}`" if query.host_contains else "this capture"
+        )
+        if query.since_seconds is not None:
+            scope += f" in the last {query.since_seconds} s"
+        return (
+            f"ssl_proxying_off: Charles recorded only encrypted CONNECT tunnels ({tunnel_count}) "
+            f"for {scope} and no readable request, so there are no paths or bodies to analyse. "
+            "If the app's requests should be here, enable SSL Proxying for its host in Charles "
+            "(Proxy > SSL Proxying Settings), make sure the device trusts the Charles "
+            "certificate, then repeat the action in the app."
+        )
+
+    @staticmethod
+    def _started_since(raw_entry: dict, window_start: float) -> bool:
+        """Whether the entry started inside the trailing time window.
 
         Entries with an unparseable or missing times.start are kept so
-        in-flight items are not silently dropped. Comparison is done with
-        timezone-aware datetimes; if the entry timestamp is naive it is
-        treated as UTC to match Charles' default export format.
+        in-flight items are not silently dropped.
         """
-        from datetime import datetime, timezone
-
-        threshold = datetime.now(timezone.utc).timestamp() - since_seconds
-        kept: list[dict] = []
-        for raw in raw_entries:
-            if not isinstance(raw, dict):
-                continue
-            times = raw.get("times") if isinstance(raw.get("times"), dict) else {}
-            start_value = times.get("start") if isinstance(times, dict) else None
-            if not isinstance(start_value, str) or not start_value:
-                kept.append(raw)
-                continue
-            try:
-                parsed = datetime.fromisoformat(start_value.replace("Z", "+00:00"))
-            except ValueError:
-                kept.append(raw)
-                continue
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            if parsed.timestamp() >= threshold:
-                kept.append(raw)
-        return kept
+        started = entry_start_timestamp(raw_entry)
+        return started is None or started >= window_start
 
     @staticmethod
     def _normalize_scope_key(

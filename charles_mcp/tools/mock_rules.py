@@ -111,7 +111,9 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         path and the value of a request-body field (default /action; "null" for GETs
         and bodies without it), with counts, sample entry_ids and response statuses.
         Use it right after reading a session so the user can name what to change.
-        Filter with host_contains / path_contains / methods. live needs capture_id."""
+        Filter with host_contains / path_contains / methods. live needs capture_id.
+        The filters apply to the whole session; limit then caps how many matching
+        entries are read, newest first, and a warning says when older ones were left out."""
         return await service.discover_variants(
             source=source,
             capture_id=capture_id,
@@ -138,7 +140,7 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         request_headers: RequestHeaderEdits = None,
         status: int | None = None,
         delay_ms: int | None = None,
-        priority: int = 0,
+        priority: int | None = None,
         host_scope: Literal["any", "exact"] = "any",
         host: str | None = None,
         match_path: str | None = None,
@@ -161,8 +163,10 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         the captured response with any status (e.g. 500), never contacting the server
         (request edits are ignored). status overrides the response code in either mode;
         delay_ms waits that many milliseconds before answering, to test loaders and client
-        timeouts. merge=true adds to the variant's existing rule; a patch on the same
-        pointer replaces the old one. Patches are checked against the captured entry."""
+        timeouts. merge=true adds to the variant's existing rule and keeps what this call
+        does not set (enabled or disabled, priority, header conditions); a patch on the
+        same pointer replaces the old one, and edits of different array elements
+        ([id=1] and [id=2]) are both kept. Patches are checked against the captured entry."""
         return await service.create_rule_from_entry(
             source=source,
             entry_id=entry_id,
@@ -238,7 +242,14 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         A dispatcher started here lives inside the MCP server and stops with it; for a
         long-running one use the `charles-mcp-dispatcher` command. By default start also
         enables Charles Map Remote and stop disables it (toggle_map_remote), so routed
-        requests never point at a stopped dispatcher; mock files and rules stay.
+        requests never point at a stopped dispatcher; mock files and rules stay. Map
+        Remote is one switch for all of Charles: switching it off also stops the
+        user's own Map Remote mappings and those served by another dispatcher. So the
+        server switches it off when it exits only if it found it off and switched it
+        on itself; a Map Remote that was already on is left on, and start says so.
+        stop switches it off even when no dispatcher is running here — the way out
+        when status reports `map_remote_without_dispatcher`. Both checks look only
+        at the configured port (CHARLES_DISPATCHER_PORT) or the `port` given.
         action="verify" proves the whole path end to end: it asks the dispatcher directly,
         then sends one harmless probe per route through the Charles proxy and reports
         whether Charles actually routed it. The probes are real requests, so they show

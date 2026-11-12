@@ -132,3 +132,30 @@ def test_reverse_captures_and_their_bodies_are_removed_together(tmp_path: Path) 
     assert captures == {"fresh", "undated"}
     # The body of the removed capture must not outlive it.
     assert blobs == {"b-fresh", "b-undated"}
+
+
+def test_leftover_reverse_session_exports_are_removed_with_the_reverse_scope(
+    tmp_path: Path,
+) -> None:
+    """Each reverse live read used to leave a whole-session export in reverse/tmp."""
+    reverse_dir = tmp_path / "reverse"
+    temp_dir = reverse_dir / "tmp"
+    temp_dir.mkdir(parents=True)
+    old_export = temp_dir / "0f3c.xml"
+    fresh_export = temp_dir / "9a1b.xml"
+    for path in (old_export, fresh_export):
+        path.write_text("<charles-session />", encoding="utf-8")
+    os.utime(old_export, (NOW - 60 * DAY, NOW - 60 * DAY))
+    os.utime(fresh_export, (NOW - DAY, NOW - DAY))
+    database = reverse_dir / "reverse.sqlite3"  # need not exist for the files to go
+
+    preview = _purge(tmp_path, reverse_database=database, dry_run=True, scopes=["reverse"])
+    assert preview.reverse_exports == ["0f3c.xml"] and old_export.exists()
+
+    report = _purge(tmp_path, reverse_database=database, dry_run=False, scopes=["reverse"])
+
+    assert report.reverse_exports == ["0f3c.xml"]
+    assert "1 leftover reverse session export file(s)" in report.summary()
+    assert not old_export.exists() and fresh_export.exists()
+    # Other scopes leave them alone.
+    assert _purge(tmp_path, reverse_database=database, dry_run=False, scopes=["recordings"]).reverse_exports == []

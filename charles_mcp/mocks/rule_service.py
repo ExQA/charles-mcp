@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
+import html
 import json
+import logging
+import re
 import socket
 from pathlib import Path
 from typing import Any, Literal
@@ -69,8 +73,11 @@ from charles_mcp.schemas.mocks import (
     VariantDiscoveryResult,
     VariantGroup,
 )
-from charles_mcp.schemas.traffic import CaptureSource, TrafficEntry
+from charles_mcp.schemas.traffic import CaptureSource, ResourceClassification, TrafficEntry
+from charles_mcp.services.traffic_query_orchestrator import READ_ALL, keep_newest
 from charles_mcp.services.traffic_query_service import TrafficQueryService
+
+logger = logging.getLogger(__name__)
 
 _MAX_BODY_CHARS = 5_000_000
 _LOOPBACK = "127.0.0.1"
@@ -83,6 +90,28 @@ _NEXT_STEP_AFTER_RULE = (
     "adds that header with the rule id. Requires a route covering the host and path "
     "(mock_route_setup) and a running dispatcher (mock_dispatcher action=start)."
 )
+
+
+_CHARLES_EXCEPTION = re.compile(
+    r"The actual exception reported was:\s*([\w.$]+)(?::\s*(.*?))?\s*(?:Charles Proxy,|$)", re.S
+)
+
+
+def parse_charles_error_page(page: str) -> tuple[str, str] | None:
+    """The Java exception Charles names on its error page, as (class, detail).
+
+    Charles answers a request it cannot forward with a 503 page that ends with
+    "The actual exception reported was: java.net.UnknownHostException: <name>:
+    ...". That line says which host Charles really tried to reach, which is the
+    difference between "the mapping did not apply" and "the mapping points
+    somewhere that does not exist".
+    """
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", page)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    match = _CHARLES_EXCEPTION.search(re.sub(r"\s+", " ", text))
+    if match is None:
+        return None
+    return match.group(1), (match.group(2) or "").strip()
 
 
 def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
@@ -125,8 +154,9 @@ def merge_patches(
     """Later edits win. A new patch drops any earlier one on the same pointer, and
     any earlier one that may address the same array element by a different mode
     (index vs ``[field=value]``) — otherwise both would apply and could hit
-    different elements once the server reorders the list. Returns the merged
-    patches and the pointers dropped as aliases (for a warning)."""
+    different elements once the server reorders the list. Patches that certainly
+    address different elements (``[id=1]`` and ``[id=2]``) are both kept. Returns
+    the merged patches and the pointers dropped as aliases (for a warning)."""
     kept: list[dict[str, Any]] = []
     aliased: list[str] = []
     for patch in existing:
@@ -181,6 +211,9 @@ class RuleService:
         self.store = store or RuleStore(config.mock_dir)
         self.scenarios = ScenarioStore(self.store.root)
         self._dispatcher: DispatcherThread | None = None
+        # True while Map Remote is on in Charles because this server turned it on:
+        # it was off before, and nobody has switched it off since.
+        self._map_remote_is_ours = False
 
     # ---- routes -------------------------------------------------------------
 
@@ -318,21 +351,24 @@ class RuleService:
         source: CaptureSource,
         capture_id: str | None,
         recording_path: str | None,
-        limit: int,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """One export of the capture (or one read of the recording); never paged."""
+        """Every entry of the capture (or recording), from one export; never paged.
+
+        The caller decides which entries to keep: cutting here would keep the
+        oldest ones, and the flow the user has just run is at the other end.
+        """
         if source == "live":
             if not capture_id:
                 raise ValueError("capture_id is required for source='live'")
             read = await self.traffic_query_service.live_service.read(
-                capture_id, cursor=0, limit=limit, advance=False
+                capture_id, cursor=0, limit=READ_ALL, advance=False
             )
             return list(read.items), None
         history = self.traffic_query_service.history_service
         if recording_path:
             return await history.get_snapshot(recording_path), recording_path
         path, raw = await history.load_latest_with_path()
-        return raw[:limit], path
+        return raw, path
 
     async def discover_variants(
         self,
@@ -344,7 +380,7 @@ class RuleService:
         path_contains: str | None = None,
         body_field: str = "/action",
         methods: list[str] | None = None,
-        limit: int = 5000,
+        limit: int = 2000,
         max_groups: int = 200,
     ) -> VariantDiscoveryResult:
         """Group captured API requests by method, host, path and a body field value.
@@ -352,7 +388,9 @@ class RuleService:
         Reads the capture once and parses full request bodies, so long sessions cost
         one Charles export instead of one per page or per truncated preview.
         """
-        raw_entries, identity = await self._raw_entries(source, capture_id, recording_path, limit)
+        if limit <= 0:
+            raise ValueError("limit must be greater than 0")
+        raw_entries, identity = await self._raw_entries(source, capture_id, recording_path)
         result = VariantDiscoveryResult(
             host_contains=host_contains,
             path_contains=path_contains,
@@ -364,7 +402,14 @@ class RuleService:
         host_filter = (host_contains or "").lower()
         groups: dict[tuple[str, str, str, str], VariantGroup] = {}
         normalizer = self.traffic_query_service.normalizer
-        for raw in raw_entries[:limit]:
+        # Cheap pass over the whole capture first: noise classes and the
+        # method/host/path filters need only routing fields. The limit then
+        # applies to what is left, newest first, so a long session cannot push
+        # the flow the user has just run out of the overview.
+        wanted: list[tuple[dict[str, Any], ResourceClassification, str, str, str]] = []
+        for raw in raw_entries:
+            if not isinstance(raw, dict):
+                continue
             classification = classify_entry(raw)
             if classification.resource_class in _NOISE_CLASSES:
                 continue
@@ -377,6 +422,14 @@ class RuleService:
                 or (path_contains and path_contains not in path)
             ):
                 continue
+            wanted.append((raw, classification, method, host, path))
+        if len(wanted) > limit:
+            result.warnings.append(
+                f"only the newest {limit} of {len(wanted)} matching entries read; narrow with "
+                "host_contains/path_contains/methods or raise limit"
+            )
+            wanted = keep_newest(wanted, limit, raw_of=lambda item: item[0])
+        for raw, classification, method, host, path in wanted:
             entry = normalizer.normalize_entry(
                 raw,
                 capture_source=source,
@@ -408,8 +461,6 @@ class RuleService:
                 group.entry_ids.append(entry.entry_id)
             if entry.response_status and entry.response_status not in group.response_statuses:
                 group.response_statuses.append(entry.response_status)
-        if len(raw_entries) > limit:
-            result.warnings.append(f"only the first {limit} of {len(raw_entries)} entries read")
         ordered = sorted(groups.values(), key=lambda g: (g.host, g.path, g.method, g.value_json))
         result.total_groups = len(ordered)
         if len(ordered) > max_groups:
@@ -437,7 +488,7 @@ class RuleService:
         request_headers: dict[str, str | None] | None = None,
         status: int | None = None,
         delay_ms: int | None = None,
-        priority: int = 0,
+        priority: int | None = None,
         host_scope: Literal["any", "exact"] = "any",
         host: str | None = None,
         match_path: str | None = None,
@@ -445,6 +496,12 @@ class RuleService:
         rule_id: str | None = None,
         description: str | None = None,
     ) -> RuleWriteResult:
+        """Create the rule for one request variant, or extend the one it already has.
+
+        With ``merge`` an existing rule keeps everything this call does not set:
+        whether it is enabled, its priority, its header conditions and response
+        headers. Only ``merge=False`` starts the rule from scratch.
+        """
         entry = await self._entry(source, entry_id, capture_id, recording_path)
         if not entry.host or not entry.path:
             raise ValueError(f"entry `{entry_id}` has no host/path")
@@ -502,9 +559,11 @@ class RuleService:
         request_header_edits = dict(request_headers or {})
         warnings: list[str] = []
         previous: MockRule | None = None
+        same_mode = False
         if merge and self.store.rule_path(rule_host, new_id).is_file():
             previous = self.store.get_rule(rule_host, new_id)
-            if previous.response.mode == mode:
+            same_mode = previous.response.mode == mode
+            if same_mode:
                 response_patches, response_aliased = merge_patches(
                     previous.response.patches, response_patches
                 )
@@ -520,8 +579,10 @@ class RuleService:
                 )
                 for pointer in response_aliased + request_aliased:
                     warnings.append(
-                        f"dropped the previous patch `{pointer}`: a new patch addresses the same "
-                        "array element by a different key, and keeping both could edit the wrong one"
+                        f"dropped the previous patch `{pointer}`: a new patch may address the "
+                        "same array element another way (a position against a [field=value] "
+                        "selector, or selectors on different fields), and keeping both could "
+                        "edit the wrong one"
                     )
             else:
                 warnings.append(f"replaced rule `{new_id}` (mode {previous.response.mode} -> {mode})")
@@ -590,12 +651,37 @@ class RuleService:
                 "nothing goes upstream"
             )
 
+        # An update keeps what this call does not set. Rebuilding the rule from
+        # the arguments alone used to switch a disabled rule back on and reset
+        # its priority, so a rule a scenario had turned off came back by itself.
+        kept: dict[str, Any] = {}
+        match_headers: dict[str, str] = {}
+        if previous is not None:
+            kept = {"enabled": previous.enabled, "created_at": previous.created_at}
+            match_headers = dict(previous.match.headers)
+            if priority is None:
+                priority = previous.priority
+            if same_mode:
+                headers = {**previous.response.headers, **headers}
+            if not previous.enabled:
+                warnings.append(
+                    f"rule `{new_id}` is disabled and stays disabled: the change is stored but "
+                    f"does not apply until mock_rule_set_enabled(host=\"{rule_host}\", "
+                    f"rule_id=\"{new_id}\", enabled=true)"
+                )
+
         rule = MockRule(
             id=new_id,
             host=rule_host,
-            priority=priority,
+            priority=priority or 0,
             description=description or (previous.description if previous else None),
-            match=RuleMatch(method=method, path=path, query=query_match, body=body_match),
+            match=RuleMatch(
+                method=method,
+                path=path,
+                query=query_match,
+                headers=match_headers,
+                body=body_match,
+            ),
             request=RuleRequest(patches=request_patches, headers=request_header_edits),
             response=RuleResponse(
                 mode=mode,
@@ -605,6 +691,7 @@ class RuleService:
                 patches=response_patches,
             ),
             source_entry_id=entry_id,
+            **kept,
         )
         return self._save(rule, fixture, warnings)
 
@@ -832,16 +919,97 @@ class RuleService:
 
     # ---- dispatcher -----------------------------------------------------------
 
-    async def _set_map_remote(self, enabled: bool) -> str:
+    async def _set_map_remote(self, enabled: bool) -> tuple[bool, str]:
+        """Switch Map Remote in Charles: whether it worked, and what to tell the caller.
+
+        Map Remote is one switch for all of Charles. Switching it off also stops
+        mappings that have nothing to do with this server, so whether this
+        server may do that on its own is decided by the callers, not here.
+        """
         if self.client_factory is None:
-            return ""
+            return False, ""
         try:
             async with self.client_factory(self.config) as client:
                 ok = await client.set_tool_enabled("map-remote", enabled)
         except Exception as exc:  # Charles down or web interface off
-            return f"; could not {'enable' if enabled else 'disable'} Map Remote in Charles: {exc}"
+            action = "enable" if enabled else "disable"
+            return False, f"; could not {action} Map Remote in Charles: {exc}"
+        if ok and not enabled:
+            self._map_remote_is_ours = False
         state = "enabled" if enabled else "disabled"
-        return f"; Map Remote {state} in Charles" if ok else f"; Charles refused to set Map Remote {state}"
+        if not ok:
+            return False, f"; Charles refused to set Map Remote {state}"
+        return True, f"; Map Remote {state} in Charles"
+
+    async def _enable_map_remote(self) -> str:
+        """Switch Map Remote on for the dispatcher, remembering whether that changed anything.
+
+        Only a switch this server turned on is its to turn off again when it
+        exits. If Map Remote was on already — for the user's own mappings, or
+        because another server instance is serving these routes — it is left
+        as it was found.
+        """
+        was_enabled = await self._map_remote_enabled()
+        ok, note = await self._set_map_remote(True)
+        if not ok or self._map_remote_is_ours:
+            return note
+        if was_enabled is False:
+            self._map_remote_is_ours = True
+            return note
+        reason = "it was already on" if was_enabled else "its earlier state could not be read"
+        return f"{note} ({reason}, so this server leaves it on when it exits)"
+
+    async def _map_remote_enabled(self) -> bool | None:
+        """Whether Map Remote is on in Charles; None when Charles cannot say."""
+        if self.client_factory is None:
+            return None
+        try:
+            async with self.client_factory(self.config) as client:
+                reader = getattr(client, "get_tool_enabled", None)
+                return await reader("map-remote") if reader is not None else None
+        except Exception:  # Charles down or web interface off
+            return None
+
+    async def routing_warnings(self) -> list[str]:
+        """Say so when routed traffic is being sent to a dispatcher that is not there.
+
+        Map Remote stays on in Charles after the dispatcher is gone — a client
+        that was killed, a session that ended without mock_dispatcher stop. From
+        then on every request under a route fails in the app, and nothing in a
+        capture explains why.
+        """
+        routes = self.store.list_routes()
+        port = self.config.dispatcher_port
+        if not routes or _port_open(_LOOPBACK, port):
+            return []
+        if await self._map_remote_enabled() is not True:
+            return []
+        return [
+            f"map_remote_without_dispatcher: Map Remote is ON in Charles but nothing answers on "
+            f"the configured dispatcher port {port} (CHARLES_DISPATCHER_PORT), so requests to "
+            f"{', '.join(_route_labels(routes))} fail in the app right now. Start the dispatcher "
+            "with mock_dispatcher(action=\"start\") or turn Map Remote off with "
+            "mock_dispatcher(action=\"stop\"). Only this port is checked: if a dispatcher was "
+            "started on another one (charles-mcp-dispatcher --port N), routing works and this "
+            "warning does not apply. Switching Map Remote off stops every Map Remote mapping "
+            "in Charles, the user's own included."
+        ]
+
+    async def shutdown(self) -> None:
+        """Leave Charles usable when the MCP server goes away.
+
+        The dispatcher lives inside the server process and dies with it. If this
+        server switched Map Remote on, it switches it off again; otherwise Charles
+        would keep sending the routed traffic to a port nobody listens on. A
+        Map Remote that was on before this server touched it is left on.
+        """
+        dispatcher = self._dispatcher
+        if dispatcher is not None and dispatcher.running:
+            dispatcher.stop()
+            logger.info("dispatcher stopped with the MCP server")
+        if self._map_remote_is_ours:
+            _, outcome = await self._set_map_remote(False)
+            logger.info("MCP server shutting down%s", outcome)
 
     async def _probe_dispatcher(self, port: int) -> tuple[bool, str]:
         """Ask the dispatcher itself, without Charles in the path."""
@@ -854,6 +1022,71 @@ class RuleService:
         if response.json().get("dispatcher") == "charles-mcp":
             return True, f"the dispatcher answers on {port}"
         return False, f"something else answers on {port}"
+
+    async def _refused_tunnel_reason(self, host: str) -> tuple[str, str] | None:
+        """Ask Charles for a tunnel to ``host`` and read why it says no.
+
+        httpx reports a refused CONNECT as a bare ProxyError and drops the page
+        Charles sent with it, so the page is fetched here with a plain socket.
+        None when Charles accepts the tunnel or cannot be asked.
+        """
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.config.proxy_host, self.config.proxy_port),
+                timeout=3.0,
+            )
+        except (OSError, asyncio.TimeoutError):
+            return None
+        try:
+            target = f"{host}:443"
+            writer.write(f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n".encode("ascii"))
+            await writer.drain()
+            data = b""
+            while len(data) < 16384:
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=8.0)
+                if not chunk:
+                    break
+                data += chunk
+                status_line = data.split(b"\r\n", 1)[0]
+                if b"\r\n" in data and b" 200" in status_line:
+                    return None  # the tunnel was granted; nothing to explain
+        except (OSError, asyncio.TimeoutError, UnicodeError):
+            return None
+        finally:
+            writer.close()
+        return parse_charles_error_page(data.decode("latin-1"))
+
+    def _explain_refused_probe(
+        self, label: str, host: str, reason: tuple[str, str] | None
+    ) -> str | None:
+        if reason is None:
+            return None
+        exception, detail = reason
+        port = self.config.dispatcher_port
+        if exception.endswith("UnknownHostException"):
+            # "<name>: nodename nor servname provided, or not known"
+            name = detail.rsplit(": ", 1)[0].strip() if ": " in detail else detail
+            if name.lower() == host.lower():
+                return (
+                    f"{label}: Charles tried to reach `{host}` itself and could not resolve it, "
+                    "so no Map Remote mapping applied to the probe. Map Remote is off, or the "
+                    "mapping is not loaded because Charles was not started after the config was "
+                    "written"
+                )
+            return (
+                f"{label}: Charles applied a Map Remote mapping, but its destination `{name}` is "
+                "not a host name, so every request under this route fails with 503. In Charles "
+                "open Tools > Map Remote, edit the mapping and set Map To: Protocol http, Host "
+                f"127.0.0.1, Port {port}, Path empty. A whole URL typed into the Host field "
+                "causes exactly this"
+            )
+        if exception.endswith("ConnectException"):
+            return (
+                f"{label}: Charles applied a Map Remote mapping, but nothing accepted the "
+                f"connection at its destination ({detail}). The mapping must point to "
+                f"http://127.0.0.1:{port}, where this dispatcher listens"
+            )
+        return f"{label}: Charles refused the probe ({exception}: {detail})"
 
     async def _probe_through_charles(self, route: RouteConfig, path_pattern: str) -> str:
         """Send one probe through the Charles proxy: does Charles route it here?"""
@@ -873,6 +1106,14 @@ class RuleService:
             ) as client:
                 response = await client.get(url)
         except httpx.HTTPError as exc:
+            # Charles refused the tunnel. Its error page names the host it really
+            # tried, which tells a mapping that did not apply from one that points
+            # at a destination that does not exist.
+            explained = self._explain_refused_probe(
+                f"{route.host}{path_pattern}", host, await self._refused_tunnel_reason(host)
+            )
+            if explained is not None:
+                return explained
             return (
                 f"{route.host}{path_pattern}: Charles did not route the probe "
                 f"({type(exc).__name__}). Map Remote is off, or the mapping is not loaded because "
@@ -931,17 +1172,22 @@ class RuleService:
             else:
                 message = "dispatcher already running"
             if toggle_map_remote and _port_open(_LOOPBACK, port):
-                message += await self._set_map_remote(True)
+                message += await self._enable_map_remote()
         elif action == "stop":
             if self._dispatcher is not None and self._dispatcher.running:
                 self._dispatcher.stop()
                 message = "dispatcher stopped"
                 if toggle_map_remote:
-                    message += await self._set_map_remote(False)
+                    message += (await self._set_map_remote(False))[1]
                 else:
                     message += "; routed requests fail until it starts again or Map Remote is off"
             else:
+                # Still worth switching Map Remote off: it may have been left on
+                # by a server that is gone, and then routed requests fail. Only
+                # this port can be checked for a dispatcher that is still alive.
                 message = "this MCP server is not running a dispatcher"
+                if toggle_map_remote and not _port_open(_LOOPBACK, port):
+                    message += (await self._set_map_remote(False))[1]
         own = self._dispatcher is not None and self._dispatcher.running
         running = own or _port_open(_LOOPBACK, port)
         if action == "verify":
@@ -958,11 +1204,15 @@ class RuleService:
                 )
             message = ". ".join(checks)
         elif action == "status":
-            message = (
-                "running inside this MCP server" if own
-                else "a dispatcher answers on this port" if running
-                else "not running; mapped routes fail until it starts"
-            )
+            if own:
+                message = "running inside this MCP server"
+            elif running:
+                message = "a dispatcher answers on this port"
+            else:
+                warnings = await self.routing_warnings()
+                message = warnings[0] if warnings else (
+                    "not running; if Map Remote is on in Charles, mapped routes fail until it starts"
+                )
         routes = self.store.list_routes()
         return DispatcherStatusResult(
             running=running,
