@@ -48,6 +48,8 @@ Since `3.1.0rc1`.
   apply.
 - `purge_stored_data` with the `reverse` scope removes leftover session exports.
 - The quick start covers excluding `control.charles` from recording and SSL Proxying.
+- The offline archive also carries wheels for Python 3.15, the current Homebrew `python3`;
+  the archive for 3.12–3.14 alone failed in `install.sh` there.
 
 ### Fixed
 
@@ -69,3 +71,8 @@ Since `3.1.0rc1`.
 - `uv.lock`: brotli 1.2.1, certifi 2026.10.23 and pyjwt 2.15.1, past PYSEC-2026-4322,
   PYSEC-2026-4320, PYSEC-2026-4141 and PYSEC-2026-4183. Offline archives built earlier
   carry the old versions; rebuild them with `scripts/build_offline_archive.py`.
+- `uv.lock`: cffi 2.0.0 → 2.1.1, pydantic 2.13.0 → 2.14.3 (pydantic-core 2.46.0 → 2.50.4),
+  rpds-py 2026.9.1 on Python 3.11+, typing-extensions 4.16.0, typing-inspection 0.4.5 —
+  the releases with wheels for Python 3.15.
+- zstandard is a dependency only before Python 3.14; from 3.14 the reverse tools decode
+  zstd with the standard library (`compression.zstd`). zstandard has no wheels for 3.15.

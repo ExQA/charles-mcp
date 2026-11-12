@@ -1,15 +1,26 @@
 import base64
 import gzip
+import sys
 
 import brotli
 import pytest
-import zstandard
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 
 from charles_mcp.reverse.config import VNextConfig
 from charles_mcp.reverse.models import CaptureSourceFormat, CaptureSourceKind
 from charles_mcp.reverse.services import DecodeService, IngestService
 from charles_mcp.reverse.storage import SQLiteStore
+
+
+def _zstd_compress(payload: bytes) -> bytes:
+    """Compress with whatever zstd this Python has: stdlib from 3.14, zstandard before."""
+    if sys.version_info >= (3, 14):
+        from compression import zstd
+
+        return zstd.compress(payload)
+    import zstandard
+
+    return zstandard.ZstdCompressor().compress(payload)
 
 
 def _make_single_transaction_xml(*, content_type: str, body_text: str, body_encoding: str = "plain", content_encoding: str | None = None) -> str:
@@ -43,7 +54,7 @@ def _make_single_transaction_xml(*, content_type: str, body_text: str, body_enco
     [
         ("gzip", gzip.compress(b"hello gzip")),
         ("br", brotli.compress(b"hello brotli")),
-        ("zstd", zstandard.ZstdCompressor().compress(b"hello zstd")),
+        ("zstd", _zstd_compress(b"hello zstd")),
     ],
 )
 def test_decode_service_handles_compressed_text_formats(tmp_path, encoding, payload):

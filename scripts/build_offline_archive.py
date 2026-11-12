@@ -39,9 +39,9 @@ from datetime import date
 from pathlib import Path
 
 # Interpreters and platforms the team actually runs. Binary wheels
-# (pydantic-core, brotli, zstandard, cffi) are built per version and per
+# (pydantic-core, brotli, zstandard before 3.14, cffi) are built per version and per
 # architecture; pure-Python ones are shared, so extra sets cost little.
-DEFAULT_PYTHON_VERSIONS = ("3.12", "3.13", "3.14")
+DEFAULT_PYTHON_VERSIONS = ("3.12", "3.13", "3.14", "3.15")
 # Apple Silicon only: the team has no Intel Macs, and since cryptography 50
 # there are no Intel macOS wheels for it at all, so an x86_64 set cannot be
 # built without pinning a cryptography release that has open advisories.
