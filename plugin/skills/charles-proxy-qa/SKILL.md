@@ -34,7 +34,7 @@ If Charles is not reachable, the user has to do this in Charles once (you cannot
 
 1. Never clear the user's Charles session unless they ask. `start_live_capture()` keeps what is already recorded; `reset_session=true` only on an explicit request.
 2. Never quit or restart Charles yourself, and never call `apply=true` while Charles runs. Ask the user to save the session and quit first.
-3. Never open or edit the Charles config file (`com.xk72.charles.config`, `charles.config`) yourself: it holds the license key and the Web Interface password. `charles_status`, `mock_dispatcher(action="verify")` and the `apply=false` answers tell you what is configured.
+3. Never open or edit the Charles config file (`com.xk72.charles.config`, `charles.config`) yourself: it holds the license key and the Web Interface password. Call `charles_config_summary` instead: it returns the mappings, SSL Proxying hosts and recording excludes without the secrets, and names what breaks each Map Remote mapping.
 4. Never call `reset_environment` unless the user asks for exactly that.
 5. Never replay a request or send a patched request to a real server without the user's consent: it goes out with real credentials.
 6. Tool output holds real tokens, cookies and personal data. Do not repeat secrets, and never write captured values into source code, tests or commits.
@@ -50,6 +50,7 @@ If Charles is not reachable, the user has to do this in Charles once (you cannot
 - `map_remote_without_dispatcher`: every request under a mocked route fails in the app. Start the dispatcher or run `mock_dispatcher(action="stop")`.
 - `charles_records_own_exports`: setup step 2 is missing.
 - `ssl_proxying_off` (on a query): Charles saw only tunnels for that host. Say so; do not report that the app sent nothing.
+- `ssl_proxying_off` or a mapping that never fires: `charles_config_summary` shows which hosts SSL Proxying and Map Remote cover.
 - `slow_export`: the session is large. Suggest clearing it before the scenario, which is the user's call.
 
 ## See what the app does
@@ -98,7 +99,7 @@ Use these only when the user names a `.chlsj` file or asks to replay or decode:
 | Symptom | Likely cause |
 |---|---|
 | Charles answers 503 "Name lookup failed" for a mocked host | The Map Remote destination is not a host name (a whole URL typed into Host). `mock_dispatcher(action="verify")` confirms it; the user fixes Map To in `Tools -> Map Remote`: protocol `http`, host `127.0.0.1`, port `18080`, empty path |
-| Rule never fires, no `X-Charles-MCP-Rule` header | Map Remote off or not loaded yet (restart Charles after `apply=true`), host or path mismatch, no SSL Proxying |
+| Rule never fires, no `X-Charles-MCP-Rule` header | Check `charles_config_summary`: each mapping lists its `problems`. Otherwise Map Remote off or not loaded yet (restart Charles after `apply=true`), host or path mismatch, no SSL Proxying |
 | `passthrough` | Request reached the dispatcher, no rule matched: path, method, `action` value, or rule disabled |
 | 421 from the dispatcher | Host or path not covered by `mock_route_setup` |
 | 502 from the dispatcher | Real server unreachable: network, VPN, certificate (`verify_tls=false` for an internal CA) |

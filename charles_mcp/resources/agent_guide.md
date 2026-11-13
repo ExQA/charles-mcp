@@ -12,7 +12,7 @@ Everything an agent needs to use this MCP server correctly: the operating model,
 ## 2. Hard rules
 
 1. **Never clear the user's Charles session** unless they explicitly ask. `start_live_capture` adopts the running session by default; pass `reset_session=true` only on an explicit request — a wrong wipe cannot be undone.
-2. **Never read or edit the Charles config file yourself, and never write it while Charles runs.** The file holds the Charles license key and the Web Interface password; `charles_status`, `mock_dispatcher(action="verify")` and the `apply=false` answers tell you what you need from it. Charles rewrites its config from memory on quit, so an edit made while it runs is lost. `apply=true` refuses while the proxy port is open; do not work around it.
+2. **Never read or edit the Charles config file yourself, and never write it while Charles runs.** The file holds the Charles license key and the Web Interface password; call `charles_config_summary` instead, which returns the settings without them. Charles rewrites its config from memory on quit, so an edit made while it runs is lost. `apply=true` refuses while the proxy port is open; do not work around it.
 3. **Never quit or restart Charles without the user's consent.** Quitting loses the unsaved session. Ask the user to save it (File → Save Session) first.
 4. **Never call `reset_environment` unless the user asks for exactly that.** It quits Charles, overwrites its config from a backup and deletes saved recordings. The backup exists only when the server manages Charles (`CHARLES_MANAGE_LIFECYCLE=true`); without one the tool changes nothing and says so.
 5. **Never replay requests or forward patched requests to production without consent.** `reverse_replay_entry` and dispatcher patch rules send real requests, with real credentials, to real servers.
@@ -73,6 +73,7 @@ Keep identities between calls and never mix them across planes.
 | `charles_status` | Connectivity, active capture, suggested next step |
 | `throttling(preset)` | `3G`, `4G`, `5G`, `fibre`, `56k`, `256k`, `off`. Affects all Charles traffic; turn it off afterwards |
 | `reset_environment` | **Destructive** (rule 4) |
+| `charles_config_summary()` | What Charles is configured to do, from its config file without the license, passwords, Rewrite values or upstream proxy: Map Remote and Map Local mappings, SSL Proxying hosts, recording excludes, allowed client IPs, Rewrite set names and hosts, tools that are on, Web Interface state. Each Map Remote mapping lists its `problems`: a destination that is not a host name, a host SSL Proxying does not cover, a local destination nothing listens on. The file is written when Charles quits, so while it runs, changes made in its windows this run are missing (`note`) |
 | `charles_recording_exclude(host="control.charles", apply=false)` | Adds a host to Proxy → Recording Settings → Exclude. Without `apply` it returns the UI steps (they work at once, no restart) and whether the config file already has it; `apply=true` writes the config and needs Charles closed — ask the user to save the session and quit first. Default host `control.charles` stops Charles recording this server's own exports |
 | `purge_stored_data(older_than_days=30, scopes, dry_run=true)` | Deletes saved captures (`recordings`), reverse-analysis data with bodies (`reverse`) and Charles config backups (`backups`) older than the cut-off. Always run `dry_run=true` first, show the user the list, and delete only after they agree — it cannot be undone. Never touches reset_environment's baseline, the newest backup in each folder, or mocks. `CHARLES_RETENTION_DAYS` runs the same purge at every server start |
 
@@ -199,7 +200,7 @@ Verified on Charles 5.2.1: a host glob matches its subdomains, the path reaches 
 
 | Symptom | Cause |
 |---|---|
-| No `X-Charles-MCP-Rule` header | Map Remote off (start the dispatcher), the Charles rule was not saved (Cancel instead of Done), host/path/protocol mismatch, no SSL Proxying |
+| No `X-Charles-MCP-Rule` header | `charles_config_summary` lists each mapping's `problems`. Otherwise: Map Remote off (start the dispatcher), the Charles rule was not saved (Cancel instead of Done), host/path/protocol mismatch, no SSL Proxying |
 | Charles 503 "Name lookup failed" | Either Map Remote did not apply and Charles went to the original host, or the mapping applied but its destination is not a host name (a whole URL typed into the Host field). `mock_dispatcher(action="verify")` reads Charles's error page and says which |
 | `passthrough` | Request reached the dispatcher but no rule matched: path, method, `action` value, disabled rule |
 | 421 from the dispatcher | Host or path not covered by a route — `mock_route_setup` |

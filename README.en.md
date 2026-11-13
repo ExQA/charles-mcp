@@ -290,6 +290,7 @@ This README documents the whole public tool surface.
 | `throttling` | Applies a Charles network throttling preset | When simulating 3G, 4G, 5G, or disabling throttling |
 | `reset_environment` | Restores Charles configuration and clears the current environment | When you need to return to a clean baseline |
 | `charles_recording_exclude` | Adds a host (default `control.charles`) to Proxy → Recording Settings → Exclude: returns the UI steps, or writes the config with `apply=true` while Charles is closed | Once per setup, so Charles stops recording this server's own exports |
+| `charles_config_summary` | Reads the Charles config file without its secrets: Map Remote and Map Local mappings with their problems, SSL Proxying hosts, recording excludes, Rewrite set names, Web Interface state | When a mapping does not fire or traffic stays encrypted, instead of opening the config file |
 | `purge_stored_data` | Deletes saved captures, reverse-analysis data and config backups older than a cut-off; `dry_run=true` by default | To clear stored traffic |
 
 ### Reverse analysis tools

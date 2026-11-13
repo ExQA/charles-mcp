@@ -7,6 +7,13 @@ first: they are the ones a client or an agent can trip over.
 
 ### Added
 
+- **`charles_config_summary`.** Reads the Charles config file and returns what explains how
+  traffic is handled: Map Remote and Map Local mappings, SSL Proxying hosts, recording
+  excludes, allowed client IPs, Rewrite set names, the tools that are on and the Web
+  Interface state. Each Map Remote mapping names its problems (a URL in the Host field, a
+  host SSL Proxying does not cover, a local destination nothing listens on). The license,
+  Web Interface users and passwords, Rewrite values and upstream proxy settings are never
+  returned, so agents no longer need to open the file, and are told not to.
 - **Install without cloning.** `uvx --from git+https://github.com/ExQA/charles-mcp charles-mcp`
   fetches, builds and runs the server; every client config in the README now uses it. The
   source checkout and the offline archive stay for development and machines without network.
