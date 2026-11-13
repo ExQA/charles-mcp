@@ -8,9 +8,10 @@
 
 ## Context
 
-The team installs this fork as a file, not from a registry: the private
-repository is not open to everyone who needs the server, and the current plan is
-to hand the fork over as an archive.
+The team installs this fork as a file, not from a registry. When this was
+decided the repository was private and not open to everyone who needed the
+server, so the fork was handed over as an archive. The repository is public now;
+the archive stays for machines that should not reach PyPI at all.
 
 Three forces shape how that archive should be built.
 

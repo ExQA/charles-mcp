@@ -19,7 +19,8 @@ from charles_mcp.config import Config
 from charles_mcp.server import create_server
 
 NOW = datetime.now(timezone.utc)
-OLD = NOW - timedelta(minutes=30)
+# Far older than any time window a test uses, so a slow run cannot blur the two.
+OLD = NOW - timedelta(days=3)
 
 
 def _tool_result(call_result):
@@ -190,7 +191,8 @@ async def test_since_seconds_finds_recent_entries_behind_600_older_ones(env) -> 
     recent = [_api_entry(f"/api/recent/{i}", start=NOW - timedelta(seconds=5)) for i in range(3)]
     capture_id = await _capture(server, fake_client, _old_entries(600) + recent)
 
-    result = await _query(server, capture_id, since_seconds=60)
+    # A day-wide window: NOW is taken at import, and the run may be slow.
+    result = await _query(server, capture_id, since_seconds=86_400)
 
     assert result["matched_count"] == 3
     assert sorted(item["path"] for item in result["items"]) == [

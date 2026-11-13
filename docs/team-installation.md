@@ -183,7 +183,7 @@ Some apps parse a response more strictly than a JSON library would, so a fixture
 | `CHARLES_DISPATCHER_PORT` / `CHARLES_DISPATCHER_TIMEOUT` | Dispatcher port (default `18080`) and upstream timeout in seconds (default `20`) |
 | `CHARLES_LOG_DIR` | MCP server log directory |
 
-Copy `.env.example` to `.env` for local values; `.env` is git-ignored.
+Set these in the `env` block of the MCP client entry; the server does not read a `.env` file.
 
 ## Releasing a team version
 

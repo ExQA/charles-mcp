@@ -156,7 +156,7 @@ def register_mock_rule_tools(mcp: FastMCP, service: RuleService) -> None:
         `host` accepts a glob such as *.example.com. match_path replaces the entry's
         exact path with a pattern where `*` stands for one segment or part of one, for
         segments that differ by platform or app version: /api/*/wallet covers
-        /api/mobile-aos2/wallet and its iOS twin. It must cover the entry's path.
+        /api/android-v2/wallet and its iOS twin. It must cover the entry's path.
         mode="patch": the real server answers; request_patches edit the request body,
         request_headers set (or remove with null) request headers before it is forwarded,
         response_patches edit only the named response fields. mode="fixture": answer from

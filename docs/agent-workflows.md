@@ -605,7 +605,7 @@ Use this when the user says things like:
 
 - "make the wallet screen show a zero balance"
 - "return an error only for the payout action"
-- "the same endpoint answers init and get_cards; change only get_cards"
+- "the same endpoint answers init and get_balance; change only get_balance"
 
 ### E.1 Call sequence
 
