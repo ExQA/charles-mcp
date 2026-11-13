@@ -66,5 +66,6 @@ CANONICAL_PUBLIC_TOOL_NAMES: tuple[str, ...] = (
     "purge_stored_data",
     # Charles settings the Web Interface cannot change
     "charles_recording_exclude",
+    "charles_config_summary",
 )
 

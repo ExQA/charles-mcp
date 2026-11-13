@@ -9,6 +9,7 @@ the Charles UI or written into the config file while Charles is closed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from charles_mcp.mocks.charles_config import (
     apply_recording_exclude,
     recording_excludes,
 )
+from charles_mcp.mocks.config_summary import summarize_config
 from charles_mcp.mocks.rule_service import _port_open
 from charles_mcp.mocks.store import MockPathError, normalize_host_pattern
 
@@ -97,7 +99,45 @@ def exclude_from_recording(config: Config, host: str, *, apply: bool) -> dict[st
     return result
 
 
+def config_summary(config: Config) -> dict[str, Any]:
+    if not config.config_path:
+        raise ValueError(
+            "Charles config file was not found; set CHARLES_CONFIG_PATH to its location"
+        )
+    try:
+        return summarize_config(
+            config.config_path,
+            charles_user=config.charles_user,
+            proxy_open=_port_open(config.proxy_host, config.proxy_port),
+        )
+    except CharlesConfigError as exc:
+        raise ValueError(str(exc)) from exc
+
+
 def register_charles_settings_tools(mcp: FastMCP, config: Config) -> None:
+    @mcp.tool()
+    async def charles_config_summary() -> dict[str, Any]:
+        """What Charles is configured to do, read from its config file without the secrets.
+
+        Returns Map Remote and Map Local mappings, SSL Proxying hosts, recording
+        excludes, allowed client IPs, Rewrite set names and hosts, which other tools
+        are on, and whether the Web Interface is enabled for CHARLES_USER. Each Map
+        Remote mapping lists its problems: a destination that is not a host name,
+        a host SSL Proxying does not cover, or a local destination nothing listens on.
+
+        The Charles license, Web Interface user names and passwords, Rewrite values,
+        upstream proxy and client certificate settings are never returned, and
+        mapping locations come back cleaned: query values as `…`, no
+        `user:password@`. Paths are returned as written. Use this tool instead of
+        opening the config file, which holds all of it.
+
+        Charles writes the file when it quits: while it runs, changes made in its
+        windows during this run are not in the file yet (`note` says so).
+        """
+        logger.info("Tool called: charles_config_summary")
+        # A file read, an XML parse and local port probes: keep them off the event loop.
+        return await asyncio.to_thread(config_summary, config)
+
     @mcp.tool()
     async def charles_recording_exclude(
         host: str = CONTROL_HOST, apply: bool = False

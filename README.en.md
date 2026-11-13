@@ -247,7 +247,7 @@ Use this for real API traffic: many paths, POST requests whose `action` field se
 4. `mock_dispatcher(action="start")`, then repeat the actions in the app.
 5. Confirm with `query_live_capture_entries(response_header_name="X-Charles-MCP-Rule")`: the header carries the rule id, or `passthrough`.
 
-Storage in `<CHARLES_MOCK_DIR>/_rules/`: `routes.json` (routes), `_any/` (rules for any host or a host glob), `<host>/` (rules for one host), fixtures next to their rules as `<rule_id>.body`. The dispatcher re-reads them on every request, so edits apply immediately. It only forwards requests covered by a route, listens on `127.0.0.1` and must run while the Charles mapping is active; for a long-running instance use the `charles-mcp-dispatcher` command. Routing a whole host (`/*`) also sends its static files and WebSocket upgrades through the dispatcher, which buffers downloads and does not support WebSockets; prefer the API prefix.
+Storage in `<CHARLES_MOCK_DIR>/_rules/`: `routes.json` (routes), `_any/` (rules for any host or a host glob), `<host>/` (rules for one host), fixtures next to their rules as `<rule_id>.body`. The dispatcher re-reads them on every request, so edits apply immediately. It only forwards requests covered by a route, listens on `127.0.0.1` and must run while the Charles mapping is active; for a long-running instance run `uvx --from git+https://github.com/ExQA/charles-mcp charles-mcp-dispatcher --port 18080` in a terminal. Routing a whole host (`/*`) also sends its static files and WebSocket upgrades through the dispatcher, which buffers downloads and does not support WebSockets; prefer the API prefix.
 
 > ⚠️ Fixtures are captured real responses and can contain personal or payment data. Keep `CHARLES_MOCK_DIR` outside any repository and never share it; share rule definitions with synthetic data instead.
 
@@ -290,6 +290,7 @@ This README documents the whole public tool surface.
 | `throttling` | Applies a Charles network throttling preset | When simulating 3G, 4G, 5G, or disabling throttling |
 | `reset_environment` | Restores Charles configuration and clears the current environment | When you need to return to a clean baseline |
 | `charles_recording_exclude` | Adds a host (default `control.charles`) to Proxy → Recording Settings → Exclude: returns the UI steps, or writes the config with `apply=true` while Charles is closed | Once per setup, so Charles stops recording this server's own exports |
+| `charles_config_summary` | Reads the Charles config file without its secrets: Map Remote and Map Local mappings with their problems, SSL Proxying hosts, recording excludes, Rewrite set names, Web Interface state | When a mapping does not fire or traffic stays encrypted, instead of opening the config file |
 | `purge_stored_data` | Deletes saved captures, reverse-analysis data and config backups older than a cut-off; `dry_run=true` by default | To clear stored traffic |
 
 ### Reverse analysis tools
