@@ -1,0 +1,12 @@
+{
+  "name": "charles-mcp",
+  "description": "Charles Proxy tools for AI agents",
+  "owner": { "name": "ExQA", "url": "https://github.com/ExQA" },
+  "plugins": [
+    {
+      "name": "charles-mcp",
+      "source": "./plugin",
+      "description": "Inspect, replay and mock mobile app traffic in Charles Proxy: MCP server plus a usage skill."
+    }
+  ]
+}

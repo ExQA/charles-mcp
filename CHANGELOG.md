@@ -3,6 +3,20 @@
 What changed for someone who uses the server or its tools. Changes in behaviour come
 first: they are the ones a client or an agent can trip over.
 
+## Unreleased
+
+### Added
+
+- **Install without cloning.** `uvx --from git+https://github.com/ExQA/charles-mcp charles-mcp`
+  fetches, builds and runs the server; every client config in the README now uses it. The
+  source checkout and the offline archive stay for development and machines without network.
+- **Claude Code plugin.** `/plugin install charles-mcp --marketplace ExQA/charles-mcp` adds the
+  server and asks for the Charles Web Interface credentials (the password goes to the system
+  keychain).
+- **`charles-proxy-qa` skill.** A `SKILL.md` that tells an agent when to reach for Charles, which
+  rules never to break and in which order to call the tools for inspecting, mocking and
+  verifying traffic. It ships with the plugin and works in any agent that loads skills.
+
 ## 3.1.0rc2 — 2026-11-12
 
 Since `3.1.0rc1`.

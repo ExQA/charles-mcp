@@ -1,0 +1,27 @@
+{
+  "name": "charles-mcp",
+  "version": "3.1.0rc2",
+  "description": "Inspect, replay and mock mobile app traffic in Charles Proxy from Claude Code: the charles-mcp MCP server plus a skill that tells Claude when and how to use it.",
+  "author": { "name": "ExQA", "url": "https://github.com/ExQA" },
+  "homepage": "https://github.com/ExQA/charles-mcp",
+  "repository": "https://github.com/ExQA/charles-mcp",
+  "license": "MIT",
+  "keywords": ["charles-proxy", "mcp", "mobile-testing", "qa", "api-mocking", "traffic-analysis"],
+  "userConfig": {
+    "charles_user": {
+      "type": "string",
+      "title": "Charles Web Interface user",
+      "description": "Proxy -> Web Interface Settings in Charles. admin is the server's default.",
+      "default": "admin",
+      "required": true
+    },
+    "charles_pass": {
+      "type": "string",
+      "title": "Charles Web Interface password",
+      "description": "The password set for that user in Charles. 123456 is the server's default.",
+      "default": "123456",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}
