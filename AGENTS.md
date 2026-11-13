@@ -1,7 +1,7 @@
 # AGENTS.md
 
 This file defines **global agent behavior rules** for `charles-mcp`.
-Agents that *use* the MCP server from another project get the rules from the server itself: MCP `instructions` and the resource `charles-mcp://agent-guide` ([charles_mcp/resources/agent_guide.md](charles_mcp/resources/agent_guide.md)); keep them in sync with this file.
+Agents that *use* the MCP server from another project get the rules from the server itself: MCP `instructions` and the resource `charles-mcp://agent-guide` ([charles_mcp/resources/agent_guide.md](charles_mcp/resources/agent_guide.md)), and the skill shipped with the plugin ([plugin/skills/charles-proxy-qa/SKILL.md](plugin/skills/charles-proxy-qa/SKILL.md)); keep them in sync with this file.
 For task-specific call sequences, see [docs/agent-workflows.md](docs/agent-workflows.md).
 For canonical public tool contracts, see [docs/contracts/tools.md](docs/contracts/tools.md).
 

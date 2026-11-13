@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "charles": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/ExQA/charles-mcp", "charles-mcp"],
+      "env": {
+        "CHARLES_USER": "${user_config.charles_user}",
+        "CHARLES_PASS": "${user_config.charles_pass}",
+        "CHARLES_MANAGE_LIFECYCLE": "false"
+      }
+    }
+  }
+}

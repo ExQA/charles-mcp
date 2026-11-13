@@ -1,7 +1,7 @@
 # AGENTS.md (український переклад)
 
 Цей файл задає **глобальні правила поведінки агента** для `charles-mcp`.
-Агенти, які *використовують* MCP-сервер з іншого проєкту, отримують правила від самого сервера: MCP `instructions` і ресурс `charles-mcp://agent-guide` ([переклад](docs/agent-guide.uk.md)).
+Агенти, які *використовують* MCP-сервер з іншого проєкту, отримують правила від самого сервера: MCP `instructions` і ресурс `charles-mcp://agent-guide` ([переклад](docs/agent-guide.uk.md)), а також skill із плагіна ([plugin/skills/charles-proxy-qa/SKILL.md](plugin/skills/charles-proxy-qa/SKILL.md)).
 Послідовності викликів для конкретних задач — у [docs/agent-workflows.uk.md](docs/agent-workflows.uk.md).
 Контракти канонічних публічних інструментів — у [docs/contracts/tools.uk.md](docs/contracts/tools.uk.md).
 
