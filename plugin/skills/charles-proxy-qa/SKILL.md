@@ -74,7 +74,7 @@ Pick the mechanism by the endpoint:
 3. **One rule per variant:** `mock_rule_create_from_entry(source="live", capture_id, entry_id, ...)` with one sample entry of that variant:
    - `match_body_fields=["/action"]` for POST variants; `match_query_fields` when a query parameter selects the variant.
    - `mode="patch"` (default): the real server answers and `response_patches` edit named fields. Prefer this.
-   - `mode="fixture"` with `status=500` (or 401, 404): the captured response is served without the server, for error and offline cases.
+   - `mode="fixture"` with `status=500` (or 401, 404): the captured response is served without the server, for error and offline cases. A status alone keeps the captured success body, which many apps still render as success; for a real error screen also replace the body with the app's error shape, taken from a captured error response when there is one: `response_patches=[{"op": "set", "path": "", "value": {...}}]`.
    - `delay_ms=5000` for loaders and client timeouts on this endpoint only.
    - `match_path="/api/*/wallet"` when a path segment differs by platform or app version.
    - Asking again for the same variant merges into its rule.
