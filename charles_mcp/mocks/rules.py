@@ -16,7 +16,7 @@ Rules and fixtures are data, never code. They live outside the repository:
 
 The same API usually runs on several hosts (dev, stage, ...), so rules default
 to ``host: "*"``; an exact-host rule wins over a pattern rule. Likewise a rule
-path may use ``*`` for one segment or part of one (``/api/*/payoneer``) when a
+path may use ``*`` for one segment or part of one (``/api/*/wallet``) when a
 segment varies by platform or version; an exact path wins over a pattern.
 
 Fixtures are usually captured from real traffic and may hold personal or
@@ -114,7 +114,7 @@ def rule_path_matches(pattern: str, path: str) -> bool:
 def route_covers_rule_path(route_pattern: str, rule_path: str) -> bool:
     """Does a route pattern send every concrete path a rule pattern can match?
 
-    ``rule_path`` may itself contain ``*`` (``/api/*/payoneer``), so treat its
+    ``rule_path`` may itself contain ``*`` (``/api/*/wallet``), so treat its
     literal head (before the first ``*``) as the family of paths it produces.
     Routes only ever use ``/*`` or a ``/prefix/*`` suffix, never a mid-segment
     wildcard, so a prefix route covers the rule when that head stays inside it.

@@ -1,0 +1,67 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><style>
+.rule{position:absolute;left:760px;width:420px;border-radius:16px;padding:14px 18px;background:#0e1628;border:1.5px solid var(--line)}
+.rule .m{font-size:15px;color:var(--ink2)}
+.rule .m .mono{color:#cfe0ff}
+.rule .r{font-size:19px;font-weight:700;margin-top:6px;display:flex;align-items:center;gap:10px}
+.out{position:absolute;left:1250px;width:290px;border-radius:16px;padding:14px 16px;background:#0e1628;border:1.5px solid var(--line)}
+.out .h{font-size:13px;color:var(--muted);margin-top:8px}
+.out .h .mono{color:#9fe2bf;font-size:13px}
+.badge{font-size:13px;font-weight:700;padding:3px 9px;border-radius:7px}
+</style></head><body>
+<div class="title"><h1>Mock by <b>request body</b>, not just by URL</h1><p>One Map Remote rule per domain. Every path, action and status after that is data.</p></div>
+
+<svg class="wires" viewBox="0 0 1600 900">
+ <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#5f7299"/></marker></defs>
+ <path d="M372 470 L420 470" stroke="#5f7299" stroke-width="3" fill="none" marker-end="url(#a)"/>
+ <path d="M680 470 C 720 470, 720 320, 756 320" stroke="#19b3a6" stroke-width="3" fill="none" marker-end="url(#a)"/>
+ <path d="M680 470 C 720 470, 720 490, 756 490" stroke="#ef5b5b" stroke-width="3" fill="none" marker-end="url(#a)"/>
+ <path d="M680 470 C 720 470, 720 660, 756 660" stroke="#5f7299" stroke-width="3" fill="none" marker-end="url(#a)"/>
+ <path d="M1180 320 L1246 320" stroke="#19b3a6" stroke-width="3" fill="none" marker-end="url(#a)"/>
+ <path d="M1180 490 L1246 490" stroke="#ef5b5b" stroke-width="3" fill="none" marker-end="url(#a)"/>
+ <path d="M1180 660 L1246 660" stroke="#5f7299" stroke-width="3" fill="none" marker-end="url(#a)"/>
+</svg>
+
+<div class="card" style="left:72px;top:300px;width:300px;height:340px">
+ <div class="tag" style="color:var(--blue)">App request</div>
+ <div class="code" style="margin-top:12px"><span class="k">POST</span> /api/v1/wallet
+Host: api.example.com
+
+{ <span class="s">"action"</span>: <span class="s">"get_balance"</span> }</div>
+ <div class="sub" style="margin-top:14px">Same URL for every operation. Map Local can only replace all of them, always with 200.</div>
+</div>
+
+<div class="card" style="left:420px;top:350px;width:260px;height:240px;border-color:#6b5222">
+ <div class="tag" style="color:var(--amber)">Charles → dispatcher</div>
+ <div class="sub mono" style="font-size:14px;color:#cfe0ff;margin-top:10px">https://*.example.com/api/*
+→ 127.0.0.1:18080</div>
+ <div class="sub" style="margin-top:10px">Picks a rule by method, path, query and body fields</div>
+</div>
+
+<div class="rule" style="top:262px;border-color:#1d6b66">
+ <div class="m">match <span class="mono">/action == "get_balance"</span></div>
+ <div class="r"><span class="badge" style="background:#0f3d3a;color:var(--teal)">PATCH</span>real response, one field edited</div>
+</div>
+<div class="rule" style="top:432px;border-color:#6b2a2a">
+ <div class="m">match <span class="mono">/action == "init"</span></div>
+ <div class="r"><span class="badge" style="background:#3d1616;color:var(--red)">FIXTURE</span>captured body, status 500</div>
+</div>
+<div class="rule" style="top:602px">
+ <div class="m">no rule matches</div>
+ <div class="r"><span class="badge" style="background:#1d2a45;color:var(--ink2)">PASS</span>real server, unchanged</div>
+</div>
+
+<div class="out" style="top:250px;border-color:#1d6b66">
+ <div class="code" style="padding:9px 11px;font-size:14px">200 { <span class="s">"balance"</span>: <span class="n">"0.00"</span>, … }</div>
+ <div class="h">X-Charles-MCP-Rule: <span class="mono">&lt;rule id&gt;</span></div>
+</div>
+<div class="out" style="top:420px;border-color:#6b2a2a">
+ <div class="code" style="padding:9px 11px;font-size:14px">500 { <span class="s">"ok"</span>: <span class="n">false</span>, … }</div>
+ <div class="h">server never contacted</div>
+</div>
+<div class="out" style="top:590px">
+ <div class="code" style="padding:9px 11px;font-size:14px">200 real response</div>
+ <div class="h">X-Charles-MCP-Rule: <span class="mono">passthrough</span></div>
+</div>
+
+<div class="foot">Rules live in <b>~/charles-mocks/_rules</b> as JSON — never in your code. The agent builds them from a captured request and changes only the fields you name.</div>
+</body></html>

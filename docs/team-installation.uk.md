@@ -183,7 +183,7 @@ claude mcp add-json charles '{"type":"stdio","command":"uv","args":["run","--pro
 | `CHARLES_DISPATCHER_PORT` / `CHARLES_DISPATCHER_TIMEOUT` | Порт диспетчера (за замовчуванням `18080`) і тайм-аут запитів до сервера в секундах (за замовчуванням `20`) |
 | `CHARLES_LOG_DIR` | Каталог логу MCP-сервера |
 
-Для локальних значень скопіюйте `.env.example` у `.env`; `.env` виключений з git.
+Задавайте їх у блоці `env` запису MCP-клієнта; файл `.env` сервер не читає.
 
 ## Випуск версії для команди
 

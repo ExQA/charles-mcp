@@ -51,7 +51,8 @@ def selftest() -> int:
     if not mocking:
         print(
             "FAIL: this build has no mocking tools. It is the upstream package, "
-            "not the team fork — install from the repository or the offline archive."
+            "not this fork — install from https://github.com/ExQA/charles-mcp or the "
+            "offline archive."
         )
         return 1
     print("OK")

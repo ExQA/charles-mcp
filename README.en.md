@@ -1,26 +1,51 @@
 # Charles MCP Server
 
-[![Version](https://img.shields.io/badge/version-3.1.0rc2-0e7c76.svg)](docs/team-installation.md)
+[![Version](https://img.shields.io/badge/version-3.1.0rc2-0e7c76.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-0e7c76.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-0e7c76.svg)](pyproject.toml)
-[![Install](https://img.shields.io/badge/install-from%20the%20archive%2C%20not%20PyPI-c75300.svg)](docs/team-installation.md)
 
-[Docs](docs/README.md) | [Team Installation](docs/team-installation.md) | [Agent guide](docs/agent-guide.md) | [Mapping & Charles restarts](docs/charles-mapping.md) | [ADR-0001](docs/adr/0001-data-driven-body-aware-mocks.md) | [Tool Contract](docs/contracts/tools.md) | [AGENTS](AGENTS.md) | [Agent Workflow Guide](docs/agent-workflows.md) | [Ukrainian README](README.md)
+[Ukrainian README](README.md) | [Docs](docs/README.md) | [Agent guide](docs/agent-guide.md) | [Mapping & Charles restarts](docs/charles-mapping.md) | [Tool Contract](docs/contracts/tools.md) | [AGENTS](AGENTS.md) | [Agent Workflow Guide](docs/agent-workflows.md) | [Team Installation](docs/team-installation.md)
 
-Charles MCP Server connects Charles Proxy to MCP clients so an agent can inspect live traffic, analyze saved recordings, and expand individual requests only when needed.
+**Give an AI agent access to Charles Proxy.** It finds the mobile app's requests on its own, explains what went wrong, and fakes responses for testing — no copying traffic into a chat, no hand-made rules in Charles.
 
-It focuses on three things:
+![Charles MCP: the app, Charles, the agent and the mock dispatcher](docs/images/charles-mcp-overview.png)
 
-- reading incremental traffic from the current Charles session while recording is still active
-- keeping live and history analysis on structured paths instead of exposing raw dump dictionaries first
-- using summary-first outputs so the agent can find hotspots before pulling detail
+## Why
 
-## This Release Direction (v3.0)
+Testing a mobile client through Charles is mostly chores:
 
-The `v3.0` direction is clear: `charles-mcp` is moving from pure traffic inspection toward reverse-engineering workflows.
+- finding one request among hundreds and pasting it into a chat with an agent;
+- changing one field of a response, while Map Local only knows "one file per URL": it cannot tell POST requests apart by an `action` in the body, and it always answers 200;
+- checking an error screen, an empty state or a slow endpoint — and remembering to switch it all off afterwards.
 
-- On top of existing live/history analysis, it now exposes a reverse-analysis tool surface (import, query, decode, replay, signature candidate discovery, and live reverse sessions).
-- The goal is to let an agent go beyond traffic browsing and build an end-to-end reverse workflow around auth flows, signatures, parameter mutation, and replayability.
+`charles-mcp` is an MCP server that lets an agent (Claude Code, Cursor, Codex, Kiro and other MCP clients) do this itself: read the Charles session, find the request, build a mock from the real response changing only the fields you named, and check that the app received it.
+
+## What it does
+
+- **Reads traffic compactly.** The agent sees groups and short summaries first, not a raw dump, and opens one request only when it needs to. Works with the live session and with saved `.chlsj` recordings.
+- **Fakes responses by request body.** A local dispatcher behind one Charles Map Remote rule tells requests apart by method, path, query and body fields (`{"action": "get_balance"}`). Either the real response with named fields edited, or a fixture with any status (500, 401) and delay.
+- **Mocks are data, not code.** Rules and fixtures live in `~/charles-mocks`, outside any repository; Charles needs one rule per domain.
+- **Reverse analysis.** Session import, body decoding (protobuf included), replay with changes, signature-field discovery.
+- **Safe defaults.** It never clears the Charles session, never writes Charles's config while Charles runs, and switches off the Map Remote it switched on.
+
+## How it works
+
+![How mocking works: Map Remote, the dispatcher, rules](docs/images/charles-mcp-mocking.png)
+
+The app talks to the network through Charles as usual. The server reads the Charles session through its Web Interface. For mocks, one Map Remote rule sends a domain's requests to a local dispatcher: it answers by rule (a fixture, or the real response with edits) and passes everything else to the real server unchanged. Every response carries an `X-Charles-MCP-Rule` header, so the agent checks the result against fresh traffic.
+
+## Example
+
+![Three states of a wallet screen: the real response, balance 0, error 500](docs/images/charles-mcp-testing.png)
+
+> **You:** The wallet screen shows a balance of 10.50. Make `get_balance` return 0 and `init` fail with 500.
+
+The agent:
+
+1. `start_live_capture` and `mock_discover_variants` — finds `POST /api/v1/wallet` with two `action` values, `init` and `get_balance`.
+2. `mock_rule_create_from_entry` twice: for `get_balance` an edit of `/data/balance` in the real response, for `init` the captured response with status 500.
+3. `mock_dispatcher(action="start")`; you refresh the screen.
+4. `query_live_capture_entries(response_header_name="X-Charles-MCP-Rule")` — both responses came from the rules, every other request reached the server unchanged.
 
 ## Quick Start
 
@@ -52,25 +77,17 @@ Two more Charles settings, both made once:
 
 ### 2. Install and configure your MCP client
 
-> **Never install this fork from a registry.** The `charles-mcp` package on PyPI is upstream 3.0.3: it has no mock tools and, without the `mcp<2` pin, fails at start with `ModuleNotFoundError: mcp.server.fastmcp`. So `uvx charles-mcp` and `pip install charles-mcp` give you a server that is missing half the tools, and the failure never names its cause. Install from this repository or from the offline archive — see [docs/team-installation.md](docs/team-installation.md).
-
-Pick one of the two install paths; everything below refers to `<PATH>`, the absolute path of the checkout or of the unpacked archive.
-
-**Path A — with [uv](https://docs.astral.sh/uv/getting-started/installation/):**
+You need Python 3.10+ and [uv](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```bash
-cd <PATH> && uv sync --locked
+git clone https://github.com/ExQA/charles-mcp.git
+cd charles-mcp && uv sync --locked
+uv run charles-mcp --selftest
 ```
 
-**Path B — offline, from an archive that carries `wheels/`:** needs Python only.
+Below, `<PATH>` is the absolute path of this folder. `--selftest` prints the version and the tool counts and ends with `OK`.
 
-```bash
-cd <PATH> && ./install.sh
-```
-
-It creates `.venv`, installs the bundled wheels including this fork itself,
-verifies the build and prints the client entry. Prefer an agent to do it? Give
-it the prompt in [INSTALL-PROMPT.md](INSTALL-PROMPT.md).
+> Install from this repository. The `charles-mcp` package on PyPI is a different, older project (upstream 3.0.3) without the mock tools, so `uvx charles-mcp` and `pip install charles-mcp` give you the wrong server. For machines without network access there is an offline archive that carries its dependencies: [docs/team-installation.md](docs/team-installation.md).
 
 Use your own Charles Web Interface credentials in `CHARLES_USER` / `CHARLES_PASS` below; the values here are placeholders.
 
@@ -107,7 +124,7 @@ claude mcp add-json charles '{
 }
 ```
 
-On path B, replace those two lines with the virtual environment's own interpreter:
+If you installed from the offline archive (`./install.sh`), replace those two lines with the program in its virtual environment:
 
 ```json
 "command": "<PATH>/.venv/bin/charles-mcp",
@@ -297,19 +314,6 @@ Storage in `<CHARLES_MOCK_DIR>/_rules/`: `routes.json` (routes), `_any/` (rules 
 
 > ⚠️ Fixtures are captured real responses and can contain personal or payment data. Keep `CHARLES_MOCK_DIR` outside any repository and never share it; share rule definitions with synthetic data instead.
 
-## Current Version Highlights (v3.0.3)
-
-- Documentation entrypoints now converge on `docs/README.md`.
-- Added agent execution docs: root-level `AGENTS.md` and task-oriented `docs/agent-workflows.md`.
-- Added agent-doc entry links in README and `docs/contracts/tools.md` using repository-relative paths.
-- Added minimal guidance semantics to high-frequency entry-tool descriptions (identity preservation, summary-first, peek/read behavior) with contract tests to prevent drift.
-- The product direction now explicitly includes reverse engineering: a reverse-analysis tool surface is available for import, decode, replay, signature-candidate discovery, and live reverse workflows.
-- `read_live_capture` and `peek_live_capture` now return route-level summary fields only, such as `host`, `method`, `path`, and `status`, instead of raw Charles entries. This keeps repeated polling from blowing up the context window.
-- `query_live_capture_entries` is now a read-only analysis path and does not advance the live cursor. You can reuse the same `capture_id` with different filters without consuming the historical increment.
-- `analyze_recorded_traffic` and `query_live_capture_entries` summaries now expose `matched_fields` and `match_reasons`, so an agent can explain why a request was selected.
-- `get_traffic_entry_detail` now defaults to `include_full_body=false` and `max_body_chars=2048`. When the estimated detail payload exceeds about 12,000 characters, the tool adds a warning suggesting a narrower request.
-- Summary and detail output automatically strip `null` values and hide internal fields such as `header_map`, `parsed_json`, `parsed_form`, and `lower_name`. Use the `headers` list when you need header values.
-
 ## Tool Catalog
 
 This README documents the whole public tool surface.
@@ -348,6 +352,8 @@ This README documents the whole public tool surface.
 | `charles_status` | Reports Charles connectivity and active capture state | When checking whether Charles is reachable or capture is still active |
 | `throttling` | Applies a Charles network throttling preset | When simulating 3G, 4G, 5G, or disabling throttling |
 | `reset_environment` | Restores Charles configuration and clears the current environment | When you need to return to a clean baseline |
+| `charles_recording_exclude` | Adds a host (default `control.charles`) to Proxy → Recording Settings → Exclude: returns the UI steps, or writes the config with `apply=true` while Charles is closed | Once per setup, so Charles stops recording this server's own exports |
+| `purge_stored_data` | Deletes saved captures, reverse-analysis data and config backups older than a cut-off; `dry_run=true` by default | To clear stored traffic |
 
 ### Reverse analysis tools
 
@@ -392,6 +398,8 @@ This README documents the whole public tool surface.
 | `mock_rule_list` / `mock_rule_get` | Lists routes and rules / shows one rule and its fixture | When reviewing what is mocked |
 | `mock_rule_set_enabled` / `mock_rule_remove` | Pauses a rule / archives it | When a scenario is finished |
 | `mock_dispatcher` | Starts, stops or checks the local dispatcher; start/stop also switch Charles Map Remote on/off so routed traffic never hits a stopped dispatcher | Before testing, and when done |
+| `mock_scenario_save` / `mock_scenario_apply` | Names a set of rules (a whole QA flow such as "payment fails after login") and switches it on in one call; `exclusive` turns every other rule off | To switch between test flows without leftovers |
+| `mock_scenario_list` / `mock_scenario_remove` | Lists scenarios and whether they are fully active / removes one without touching its rules | To see or tidy saved flows |
 
 ## Key Behavior
 
@@ -415,14 +423,14 @@ All summary and detail outputs have been serialized lean:
 - `null` values are stripped automatically during serialization
 - When `full_text` is present in a detail view, the redundant `preview_text` is removed
 
-Default parameters have been lowered to protect the context window:
+Defaults are small to protect the context window:
 
-| Parameter | Old default | New default |
-| --- | --- | --- |
-| `max_items` | 20 | 10 |
-| `max_preview_chars` | 256 | 128 |
-| `max_headers_per_side` | 8 | 6 |
-| `max_body_chars` | 4096 | 2048 |
+| Parameter | Default |
+| --- | --- |
+| `max_items` | 10 |
+| `max_preview_chars` | 128 |
+| `max_headers_per_side` | 6 |
+| `max_body_chars` | 2048 |
 
 Higher values can still be passed explicitly when a wider view is needed.
 
@@ -468,6 +476,10 @@ Useful local checks:
 python charles-mcp-server.py
 python -c "from charles_mcp.main import main; main()"
 ```
+
+## Origin
+
+This is a fork of [heizaheiza/Charles-mcp](https://github.com/heizaheiza/Charles-mcp) (MIT). The fork adds response mocking (Map Local and a rule dispatcher), handling of long sessions and the fixes listed in [CHANGELOG.md](CHANGELOG.md). Details in [PROVENANCE.md](PROVENANCE.md).
 
 ## See Also
 
