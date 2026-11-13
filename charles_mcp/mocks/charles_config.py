@@ -23,6 +23,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from defusedxml import ElementTree as SafeET
+from defusedxml.common import DefusedXmlException
+
+# A real Charles config is a few kilobytes, tens with many rules.
+MAX_CONFIG_BYTES = 2 * 1024 * 1024
 
 REWRITE_SET_PREFIX = "charles-mcp mocks: "
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
@@ -120,14 +124,30 @@ def _load_config(config_path: str | Path) -> tuple[Path, str, ET.Element]:
     path = Path(config_path)
     if not path.is_file():
         raise CharlesConfigError(f"Charles config file not found: {path}")
-    text = path.read_text(encoding="utf-8")
+    # Read at most one byte past the limit: a file that is not a Charles config
+    # (or was grown on purpose) must not be loaded whole and parsed into a tree.
+    try:
+        with path.open("rb") as handle:
+            raw = handle.read(MAX_CONFIG_BYTES + 1)
+    except OSError as exc:
+        raise CharlesConfigError(f"cannot read {path}: {exc.strerror or exc}") from exc
+    if len(raw) > MAX_CONFIG_BYTES:
+        raise CharlesConfigError(
+            f"{path} is larger than {MAX_CONFIG_BYTES} bytes, far more than a Charles config "
+            "holds; refusing to parse it"
+        )
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CharlesConfigError(f"{path} is not UTF-8 text: {exc.reason}") from exc
     root_start = text.find("<configuration")
     if root_start < 0:
         raise CharlesConfigError(f"{path} does not look like a Charles config file")
     try:
         root = SafeET.fromstring(text[root_start:])
-    except ET.ParseError as exc:
-        raise CharlesConfigError(f"cannot parse {path}: {exc}") from exc
+    except (ET.ParseError, DefusedXmlException) as exc:
+        # The message names a line and column, never the content.
+        raise CharlesConfigError(f"cannot parse {path}: {type(exc).__name__}") from exc
     return path, text[:root_start], root
 
 

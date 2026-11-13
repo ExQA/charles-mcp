@@ -8,9 +8,18 @@ explain how traffic is handled: Map Remote and Map Local mappings, SSL Proxying
 and recording host lists, the tools that are switched on, and whether the Web
 Interface is enabled for the configured user.
 
-Everything is picked from an allow list. A section this module does not know is
-left out, never copied, so a Charles version that adds a secret somewhere new
-does not leak it.
+Two rules keep secrets in the file:
+
+- **Sections come from an allow list of exact names.** A section this module
+  does not name is left out, never copied, so a Charles version that adds a
+  secret somewhere new does not leak it.
+- **Values are cleaned before they are returned or quoted in a diagnostic.**
+  A location (protocol, host, port, path, query) is user input: a mapping for
+  ``?access_token=...`` or a whole URL typed into the Host field would carry a
+  token or a password into the summary. Query values are replaced with ``…``
+  (parameter names stay), a ``user:password@`` part is dropped, and numbers and
+  flags are returned only when they parse as such. Paths are returned as
+  written: without them a mapping cannot be told from its neighbour.
 
 Charles writes the file from memory when it quits and leaves out values that
 are at their defaults, so the summary describes Charles as it was at its last
@@ -19,6 +28,7 @@ exit, and a missing element means "default".
 
 from __future__ import annotations
 
+import re
 import socket
 from datetime import datetime, timezone
 from fnmatch import fnmatchcase
@@ -27,6 +37,11 @@ from typing import Any
 from xml.etree.ElementTree import Element  # nosec B405 - type only; parsing is defusedxml
 
 from charles_mcp.mocks.charles_config import _load_config
+
+# Longest list returned for one setting; the rest is counted, not listed.
+MAX_LIST_ITEMS = 100
+# Longest single value returned; a longer one is cut.
+MAX_VALUE_CHARS = 200
 
 # Tools reported only as switched on or off and whether they hold anything:
 # their entries can hold request data, so the entries themselves stay out.
@@ -44,9 +59,20 @@ _COUNTED_TOOLS = {
     "Client Process": "client_process",
 }
 
-# proxyConfiguration scalars worth showing. Anything else there (an upstream
-# proxy with its user and password, for one) stays out.
-_PROXY_SCALARS = ("port", "enableSOCKSProxy", "socksPort", "transparentProxy", "enableMacOSXProxy")
+# proxyConfiguration values worth showing, each a number or a flag. Anything
+# else there (an upstream proxy with its user and password, client
+# certificates and their passphrases) stays out.
+_PROXY_SCALARS = {
+    "port": "port",
+    "enableSOCKSProxy": "socks_enabled",
+    "socksPort": "socks_port",
+    "transparentProxy": "transparent",
+    "enableMacOSXProxy": "macos_proxy",
+}
+
+_HTTPS_PORT = "443"
+_PROTOCOL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]{0,15}")
+_PORT = re.compile(r"[0-9*?\-]{1,11}")
 
 
 def summarize_config(
@@ -65,18 +91,19 @@ def summarize_config(
     path, _prolog, root = _load_config(config_path)
     warnings: list[str] = []
 
-    ssl_lists = _ssl_lists(root)
-    ssl_hosts = ssl_lists.get("sslLocations", [])
-    recording_excludes = _hosts(root.find("recordingConfiguration/ignoreHosts"))
-    recording_includes = _hosts(root.find("recordingConfiguration/includeHosts"))
+    # Exactly this list and no other child of proxyConfiguration: a section
+    # that merely looks like a host list may hold something else.
+    ssl_locations = _locations(root.find("proxyConfiguration/sslLocations"))
+    recording_excludes = _locations(root.find("recordingConfiguration/ignoreHosts"))
+    recording_includes = _locations(root.find("recordingConfiguration/includeHosts"))
     tools = _tools(root)
 
-    map_remote = _map_remote(tools.get("Map Remote"), ssl_hosts, warnings)
+    map_remote = _map_remote(tools.get("Map Remote"), ssl_locations, warnings)
     map_local = _map_local(tools.get("Map Local"))
     rewrite = _rewrite(tools.get("Rewrite"))
     web_interface = _web_interface(root, charles_user, warnings)
 
-    if "control.charles" not in recording_excludes:
+    if not any(location.get("host") == "control.charles" for location in recording_excludes):
         warnings.append(
             "recording_not_excluded: control.charles is not in Proxy > Recording Settings > "
             "Exclude, so Charles records every session export this server makes. Use "
@@ -90,12 +117,12 @@ def summarize_config(
         .replace("+00:00", "Z"),
         "charles_running": proxy_open,
         "proxy": _proxy(root),
-        "ssl_proxying": {
-            "hosts": ssl_hosts,
-            **{_snake(tag): hosts for tag, hosts in ssl_lists.items() if tag != "sslLocations"},
+        "ssl_proxying": {"hosts": _capped([_host_port(item) for item in ssl_locations])},
+        "recording": {
+            "excluded_hosts": _capped([_host_port(item) for item in recording_excludes]),
+            "included_hosts": _capped([_host_port(item) for item in recording_includes]),
         },
-        "recording": {"excluded_hosts": recording_excludes, "included_hosts": recording_includes},
-        "access_control": _access_control(root),
+        "access_control": _capped(_access_control(root)),
         "web_interface": web_interface,
         "map_remote": map_remote,
         "map_local": map_local,
@@ -110,10 +137,11 @@ def summarize_config(
             "Charles license",
             "Web Interface user names and passwords",
             "Rewrite match and replace values",
-            "upstream proxy settings",
+            "query values and credentials inside mapping locations",
+            "upstream proxy and client certificate settings",
             "window, file and update settings",
         ],
-        "warnings": warnings,
+        "warnings": _capped(warnings),
     }
     if proxy_open:
         summary["note"] = (
@@ -130,32 +158,26 @@ def _proxy(root: Element) -> dict[str, Any]:
     proxy = root.find("proxyConfiguration")
     values: dict[str, Any] = {"port": 8888}
     if proxy is not None:
-        for tag in _PROXY_SCALARS:
-            element = proxy.find(tag)
-            if element is not None and element.text is not None:
-                values[_snake(tag)] = _scalar(element.text)
+        for tag, key in _PROXY_SCALARS.items():
+            value = _number_or_flag(proxy.findtext(tag))
+            if value is not None:
+                values[key] = value
     return values
-
-
-def _ssl_lists(root: Element) -> dict[str, list[str]]:
-    """Every host list under proxyConfiguration whose name mentions SSL."""
-    proxy = root.find("proxyConfiguration")
-    if proxy is None:
-        return {}
-    return {
-        child.tag: _hosts(child)
-        for child in proxy
-        if "ssl" in child.tag.lower() and child.find("locationPatterns") is not None
-    }
 
 
 def _access_control(root: Element) -> list[str]:
     ranges = []
     for ip_range in root.findall("accessControlConfiguration/ipRanges/ipRange"):
-        ip = ".".join(item.text or "" for item in ip_range.findall("ip/int"))
-        mask = ".".join(item.text or "" for item in ip_range.findall("mask/int"))
-        ranges.append(f"{ip}/{mask}" if mask else ip)
+        ip = _dotted(ip_range.findall("ip/int"))
+        mask = _dotted(ip_range.findall("mask/int"))
+        if ip:
+            ranges.append(f"{ip}/{mask}" if mask else ip)
     return ranges
+
+
+def _dotted(parts: list[Element]) -> str:
+    numbers = [(part.text or "").strip() for part in parts]
+    return ".".join(numbers) if numbers and all(n.isdigit() for n in numbers) else ""
 
 
 def _web_interface(root: Element, charles_user: str | None, warnings: list[str]) -> dict[str, Any]:
@@ -189,7 +211,9 @@ def _tools(root: Element) -> dict[str, Element]:
     return tools
 
 
-def _map_remote(tool: Element | None, ssl_hosts: list[str], warnings: list[str]) -> dict[str, Any]:
+def _map_remote(
+    tool: Element | None, ssl_locations: list[dict[str, str]], warnings: list[str]
+) -> dict[str, Any]:
     if tool is None:
         return {"enabled": False, "mappings": []}
     enabled = _flag(tool, "toolEnabled")
@@ -204,38 +228,42 @@ def _map_remote(tool: Element | None, ssl_hosts: list[str], warnings: list[str])
             "enabled": _flag(mapping, "enabled", default=True),
         }
         problems = _mapping_problems(
-            source, dest, ssl_hosts, mapping_on=enabled and item["enabled"]
+            source, dest, ssl_locations, mapping_on=enabled and item["enabled"]
         )
         if problems:
             item["problems"] = problems
             warnings.extend(f"map_remote {item['from']}: {problem}" for problem in problems)
         mappings.append(item)
-    return {"enabled": enabled, "mappings": mappings}
+    return {"enabled": enabled, "mappings": _capped(mappings)}
 
 
 def _mapping_problems(
-    source: dict[str, str], dest: dict[str, str], ssl_hosts: list[str], *, mapping_on: bool
+    source: dict[str, str],
+    dest: dict[str, str],
+    ssl_locations: list[dict[str, str]],
+    *,
+    mapping_on: bool,
 ) -> list[str]:
+    """What stops a Map Remote mapping from working. Quotes cleaned values only."""
     problems = []
     dest_host = dest.get("host", "")
-    if any(mark in dest_host for mark in ("://", "/", ":")):
+    if any(mark in dest_host for mark in ("://", "/", ":", "?")):
         problems.append(
             f"destination host {dest_host!r} is not a host name; Charles fails with 'Name "
             "lookup failed'. Put only the host in Host and the port in Port."
         )
     source_host = source.get("host", "")
-    if (
-        source.get("protocol", "https") == "https"
-        and source_host
-        and not _covered(source_host, ssl_hosts)
-    ):
-        problems.append(
-            f"SSL Proxying does not cover {source_host}, so Charles sees only a tunnel and "
-            "never maps the request."
-        )
-    if mapping_on and dest_host in {"127.0.0.1", "localhost"} and dest.get("port"):
-        port = int(dest["port"]) if dest["port"].isdigit() else None
-        if port is not None and not _listening(port):
+    if source.get("protocol", "https").lower() == "https" and source_host:
+        source_port = source.get("port", "")
+        if not _ssl_covers(source_host, source_port, ssl_locations):
+            where = f"{source_host}:{source_port or _HTTPS_PORT}"
+            problems.append(
+                f"SSL Proxying does not cover {where}, so Charles sees only a tunnel and "
+                "never maps the request."
+            )
+    if mapping_on and dest_host in {"127.0.0.1", "localhost"} and dest.get("port", "").isdigit():
+        port = int(dest["port"])
+        if 0 < port < 65536 and not _listening(port):
             problems.append(
                 f"nothing listens on {dest_host}:{port}; every request under this mapping "
                 "fails until the dispatcher runs (mock_dispatcher action=start)."
@@ -249,12 +277,12 @@ def _map_local(tool: Element | None) -> dict[str, Any]:
     mappings = [
         {
             "from": _url(_location(mapping.find("sourceLocation"))),
-            "to": (mapping.findtext("dest") or "").strip(),
+            "to": _cut((mapping.findtext("dest") or "").strip()),
             "enabled": _flag(mapping, "enabled", default=True),
         }
         for mapping in tool.findall("mappings/mapLocalMapping")
     ]
-    return {"enabled": _flag(tool, "toolEnabled"), "mappings": mappings}
+    return {"enabled": _flag(tool, "toolEnabled"), "mappings": _capped(mappings)}
 
 
 def _rewrite(tool: Element | None) -> dict[str, Any]:
@@ -262,17 +290,19 @@ def _rewrite(tool: Element | None) -> dict[str, Any]:
         return {"enabled": False, "sets": []}
     sets = [
         {
-            "name": (rewrite_set.findtext("name") or "").strip(),
+            "name": _cut((rewrite_set.findtext("name") or "").strip()),
             "active": _flag(rewrite_set, "active", default=True),
-            "hosts": [
-                _url(_location(match.find("location")))
-                for match in rewrite_set.findall("hosts/locationPatterns/locationMatch")
-            ],
+            "hosts": _capped(
+                [
+                    _url(_location(match.find("location")))
+                    for match in rewrite_set.findall("hosts/locationPatterns/locationMatch")
+                ]
+            ),
             "rule_count": len(rewrite_set.findall("rules/rewriteRule")),
         }
         for rewrite_set in tool.findall("sets/rewriteSet")
     ]
-    return {"enabled": _flag(tool, "toolEnabled"), "sets": sets}
+    return {"enabled": _flag(tool, "toolEnabled"), "sets": _capped(sets)}
 
 
 def _counted_tool(tool: Element) -> dict[str, Any]:
@@ -281,32 +311,90 @@ def _counted_tool(tool: Element) -> dict[str, Any]:
     return {"enabled": _flag(tool, "toolEnabled"), "configured": has_entries}
 
 
-# ------------------------------------------------------------------- helpers
+# ------------------------------------------------------------------ locations
 
 
-def _hosts(parent: Element | None) -> list[str]:
+def _locations(parent: Element | None) -> list[dict[str, str]]:
+    """The cleaned locations of a Charles host list (``locationPatterns``)."""
     if parent is None:
         return []
-    hosts = []
-    for match in parent.findall("locationPatterns/locationMatch"):
-        location = _location(match.find("location"))
-        if location.get("host"):
-            hosts.append(
-                f"{location['host']}:{location['port']}"
-                if location.get("port")
-                else location["host"]
-            )
-    return hosts
+    return [
+        location
+        for match in parent.findall("locationPatterns/locationMatch")
+        if (location := _location(match.find("location"))).get("host")
+    ]
 
 
 def _location(element: Element | None) -> dict[str, str]:
+    """A Charles location with every part cleaned; the only way values leave the file.
+
+    Parts that do not look like what they should be are dropped rather than
+    passed on: a protocol or a port is a short token, never free text.
+    """
     if element is None:
         return {}
-    return {
+    raw = {
         tag: (element.findtext(tag) or "").strip()
         for tag in ("protocol", "host", "port", "path", "query")
-        if element.find(tag) is not None
     }
+    location: dict[str, str] = {}
+    if _PROTOCOL.fullmatch(raw["protocol"]):
+        location["protocol"] = raw["protocol"]
+    if raw["host"]:
+        location["host"] = _clean_host(raw["host"])
+    if _PORT.fullmatch(raw["port"]):
+        location["port"] = raw["port"]
+    if raw["path"]:
+        location["path"] = _clean_path(raw["path"])
+    if raw["query"]:
+        location["query"] = _query_names(raw["query"])
+    return location
+
+
+def _clean_host(host: str) -> str:
+    """A host as typed into Charles, without credentials or query values.
+
+    A host is meant to be a name, but a whole URL typed into the field is the
+    very mistake the summary reports, and such a URL can carry a password
+    (``https://user:pass@host``) or a token (``host/path?key=...``).
+    """
+    scheme, separator, rest = host.partition("://")
+    if not separator:
+        scheme, rest = "", host
+    rest, _, fragment = rest.partition("#")
+    rest, question, query = rest.partition("?")
+    authority, slash, path = rest.partition("/")
+    authority = authority.rsplit("@", 1)[-1]
+    cleaned = authority + slash + path
+    if question:
+        cleaned += f"?{_query_names(query)}"
+    if fragment:
+        cleaned += "#…"
+    return _cut(f"{scheme}://{cleaned}" if scheme else cleaned)
+
+
+def _clean_path(path: str) -> str:
+    path, _, fragment = path.partition("#")
+    path, question, query = path.partition("?")
+    if question:
+        path += f"?{_query_names(query)}"
+    return _cut(path + ("#…" if fragment else ""))
+
+
+def _query_names(query: str) -> str:
+    """Parameter names of a query pattern, never their values: ``a=…&b=…``.
+
+    A part without ``=`` cannot be told from a bare value, so it becomes ``…``
+    unless it is only wildcards.
+    """
+    parts = []
+    for item in query.split("&"):
+        name, equals, _value = item.partition("=")
+        if equals:
+            parts.append(f"{name}=…")
+        else:
+            parts.append(item if item and not item.strip("*?") else "…")
+    return _cut("&".join(parts))
 
 
 def _url(location: dict[str, str]) -> str:
@@ -314,18 +402,35 @@ def _url(location: dict[str, str]) -> str:
     url = f"{location['protocol']}://{host}" if location.get("protocol") else host
     if location.get("port"):
         url += f":{location['port']}"
-    url += location.get("path") or ""
+    url += location.get("path", "")
     if location.get("query"):
         url += f"?{location['query']}"
     return url
 
 
-def _covered(host: str, ssl_hosts: list[str]) -> bool:
-    for entry in ssl_hosts:
-        pattern = entry.rsplit(":", 1)[0] if entry.rsplit(":", 1)[-1].isdigit() else entry
-        if pattern in {"*", ""} or fnmatchcase(host, pattern):
+def _host_port(location: dict[str, str]) -> str:
+    return f"{location['host']}:{location['port']}" if location.get("port") else location["host"]
+
+
+def _ssl_covers(host: str, port: str, ssl_locations: list[dict[str, str]]) -> bool:
+    """Whether an SSL Proxying entry covers a mapping's source ``host:port``.
+
+    Charles reads an empty field as "any": an entry without a port covers every
+    port. A mapping without a port is checked against 443, where HTTPS traffic
+    arrives unless the URL says otherwise. Hosts compare without case, and the
+    entry's ``*`` and ``?`` are wildcards.
+    """
+    host = host.lower()
+    port = port if port and port != "*" else _HTTPS_PORT
+    for entry in ssl_locations:
+        entry_host = entry.get("host", "").lower()
+        entry_port = entry.get("port", "") or "*"
+        if fnmatchcase(host, entry_host) and fnmatchcase(port, entry_port):
             return True
     return False
+
+
+# -------------------------------------------------------------------- helpers
 
 
 def _listening(port: int) -> bool:
@@ -343,15 +448,20 @@ def _flag(parent: Element, tag: str, *, default: bool = False) -> bool:
     return text.strip().lower() == "true"
 
 
-def _scalar(text: str) -> Any:
-    value = text.strip()
-    if value.lower() in {"true", "false"}:
-        return value.lower() == "true"
-    return int(value) if value.isdigit() else value
+def _number_or_flag(text: str | None) -> bool | int | None:
+    """A config value that is a number or a flag; anything else is not returned."""
+    value = (text or "").strip().lower()
+    if value in {"true", "false"}:
+        return value == "true"
+    return int(value) if value.isdigit() and len(value) <= 9 else None
 
 
-def _snake(tag: str) -> str:
-    out = ""
-    for char in tag:
-        out += f"_{char.lower()}" if char.isupper() and out else char.lower()
-    return out
+def _cut(value: str) -> str:
+    return value if len(value) <= MAX_VALUE_CHARS else value[:MAX_VALUE_CHARS] + "…"
+
+
+def _capped(items: list[Any]) -> list[Any]:
+    """At most MAX_LIST_ITEMS items; a last string says how many were left out."""
+    if len(items) <= MAX_LIST_ITEMS:
+        return items
+    return [*items[:MAX_LIST_ITEMS], f"… and {len(items) - MAX_LIST_ITEMS} more, not listed"]

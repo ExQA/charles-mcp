@@ -9,6 +9,7 @@ the Charles UI or written into the config file while Charles is closed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -124,15 +125,18 @@ def register_charles_settings_tools(mcp: FastMCP, config: Config) -> None:
         Remote mapping lists its problems: a destination that is not a host name,
         a host SSL Proxying does not cover, or a local destination nothing listens on.
 
-        The Charles license, Web Interface user names and passwords, Rewrite values
-        and upstream proxy settings are never returned. Use this tool instead of
-        opening the config file, which holds them.
+        The Charles license, Web Interface user names and passwords, Rewrite values,
+        upstream proxy and client certificate settings are never returned, and
+        mapping locations come back cleaned: query values as `…`, no
+        `user:password@`. Paths are returned as written. Use this tool instead of
+        opening the config file, which holds all of it.
 
         Charles writes the file when it quits: while it runs, changes made in its
         windows during this run are not in the file yet (`note` says so).
         """
         logger.info("Tool called: charles_config_summary")
-        return config_summary(config)
+        # A file read, an XML parse and local port probes: keep them off the event loop.
+        return await asyncio.to_thread(config_summary, config)
 
     @mcp.tool()
     async def charles_recording_exclude(

@@ -201,3 +201,190 @@ async def test_the_tool_reads_the_configured_file(
     assert result["web_interface"]["configured_user_present"] is True
     for secret in SECRETS:
         assert secret not in json.dumps(result)
+
+
+# ------------------------------------------------- secrets inside locations
+
+
+def _minimal(body: str, proxy: str = "") -> str:
+    return f"""<?xml version='1.0' encoding='UTF-8' ?>
+<configuration>
+  <proxyConfiguration>{proxy}</proxyConfiguration>
+  <toolConfiguration><configs>{body}</configs></toolConfiguration>
+</configuration>
+"""
+
+
+def _write(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "charles.config"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_secrets_typed_into_locations_never_reach_the_summary(tmp_path: Path) -> None:
+    """Every place a location is returned or quoted, with a secret in each part of it."""
+    loc = (
+        "<protocol>https</protocol><host>{host}</host><port>443</port>"
+        "<path>/v1/pay?sig=SENTINEL-PATH</path><query>access_token=SENTINEL-QUERY&amp;page=2</query>"
+    )
+    body = f"""
+    <entry><string>Map Remote</string><map><toolEnabled>true</toolEnabled><mappings>
+      <mapMapping>
+        <sourceLocation>{loc.format(host="user:SENTINEL-SRC@api.example.com")}</sourceLocation>
+        <destLocation><host>https://admin:SENTINEL-DEST@127.0.0.1:18080/x?key=SENTINEL-DESTQ#SENTINEL-FRAG</host>
+          <query>SENTINEL-BARE</query></destLocation>
+      </mapMapping>
+    </mappings></map></entry>
+    <entry><string>Map Local</string><mapLocal><mappings><mapLocalMapping>
+      <sourceLocation>{loc.format(host="files.example.com")}</sourceLocation><dest>/tmp/mocks</dest>
+    </mapLocalMapping></mappings></mapLocal></entry>
+    <entry><string>Rewrite</string><rewrite><sets><rewriteSet><name>set</name>
+      <hosts><locationPatterns><locationMatch><location>{loc.format(host="rw.example.com")}</location></locationMatch></locationPatterns></hosts>
+    </rewriteSet></sets></rewrite></entry>
+    """
+    proxy = """<sslLocations><locationPatterns><locationMatch><location>
+      <host>u:SENTINEL-SSL@ssl.example.com</host><port>SENTINEL-PORT</port><protocol>SENTINEL PROTOCOL</protocol>
+    </location></locationMatch></locationPatterns></sslLocations>
+    <port>SENTINEL-PROXYPORT</port>"""
+
+    summary = summarize_config(_write(tmp_path, _minimal(body, proxy)), proxy_open=False)
+    dumped = json.dumps(summary)
+
+    assert "SENTINEL" not in dumped, dumped
+    mapping = summary["map_remote"]["mappings"][0]
+    # What is useful for diagnosis survives: hosts, paths and parameter names.
+    assert mapping["from"] == "https://api.example.com:443/v1/pay?sig=…?access_token=…&page=…"
+    assert mapping["to"] == "https://127.0.0.1:18080/x?key=…#…?…"
+    assert "is not a host name" in mapping["problems"][0]
+    assert summary["ssl_proxying"]["hosts"] == ["ssl.example.com"]
+    assert summary["proxy"] == {"port": 8888}
+
+
+def test_only_the_named_ssl_section_is_read(tmp_path: Path) -> None:
+    """A section that merely looks like a host list is not copied."""
+    proxy = """
+    <sslPrivateSettings><locationPatterns><locationMatch><location>
+      <host>SENTINEL-UNKNOWN.example.com</host></location></locationMatch></locationPatterns></sslPrivateSettings>
+    <sslClientCertificates><locationPatterns><locationMatch><location><host>SENTINEL-CERT</host></location>
+      <passphrase>SENTINEL-PASSPHRASE</passphrase></locationMatch></locationPatterns></sslClientCertificates>
+    <sslLocations><locationPatterns><locationMatch><location><host>api.example.com</host></location>
+      </locationMatch></locationPatterns></sslLocations>"""
+
+    summary = summarize_config(_write(tmp_path, _minimal("", proxy)), proxy_open=False)
+
+    assert "SENTINEL" not in json.dumps(summary)
+    assert summary["ssl_proxying"] == {"hosts": ["api.example.com"]}
+
+
+# ------------------------------------------------------------ SSL coverage
+
+
+def _problems_for(tmp_path: Path, source_port: str, ssl_port: str, ssl_host: str = "api.example.com"):
+    port_tag = f"<port>{source_port}</port>" if source_port else ""
+    ssl_port_tag = f"<port>{ssl_port}</port>" if ssl_port else ""
+    body = f"""<entry><string>Map Remote</string><map><mappings><mapMapping>
+      <sourceLocation><protocol>https</protocol><host>API.example.com</host>{port_tag}</sourceLocation>
+      <destLocation><protocol>https</protocol><host>staging.example.com</host></destLocation>
+    </mapMapping></mappings></map></entry>"""
+    proxy = f"""<sslLocations><locationPatterns><locationMatch><location>
+      <host>{ssl_host}</host>{ssl_port_tag}</location></locationMatch></locationPatterns></sslLocations>"""
+    summary = summarize_config(_write(tmp_path, _minimal(body, proxy)), proxy_open=False)
+    return summary["map_remote"]["mappings"][0].get("problems", [])
+
+
+@pytest.mark.parametrize(
+    ("source_port", "ssl_port", "covered"),
+    [
+        ("443", "443", True),
+        ("443", "", True),  # an SSL entry without a port covers every port
+        ("443", "*", True),
+        ("", "443", True),  # a mapping without a port is HTTPS on 443
+        ("443", "8443", False),
+        ("", "8443", False),
+        ("8443", "443", False),
+        ("8443", "8443", True),
+    ],
+)
+def test_ssl_coverage_compares_ports_as_well_as_hosts(
+    tmp_path: Path, source_port: str, ssl_port: str, covered: bool
+) -> None:
+    problems = _problems_for(tmp_path, source_port, ssl_port)
+
+    assert (not problems) is covered, problems
+    if not covered:
+        assert f"api.example.com:{source_port or '443'}".lower() in problems[0].lower()
+
+
+def test_ssl_coverage_follows_host_wildcards(tmp_path: Path) -> None:
+    assert _problems_for(tmp_path, "443", "443", ssl_host="*.example.com") == []
+    assert _problems_for(tmp_path, "443", "443", ssl_host="*.other.example") != []
+
+
+# ------------------------------------------------------- hostile or broken files
+
+
+def test_an_oversized_file_is_refused_before_it_is_parsed(tmp_path: Path) -> None:
+    from charles_mcp.mocks.charles_config import MAX_CONFIG_BYTES, CharlesConfigError
+
+    path = tmp_path / "charles.config"
+    with path.open("wb") as handle:
+        handle.write(b"<configuration>")
+        handle.truncate(MAX_CONFIG_BYTES + 10)  # sparse: no real megabytes written
+
+    with pytest.raises(CharlesConfigError, match="larger than"):
+        summarize_config(path)
+
+
+def test_long_lists_are_cut_and_counted(tmp_path: Path) -> None:
+    from charles_mcp.mocks.config_summary import MAX_LIST_ITEMS
+
+    hosts = "".join(
+        f"<locationMatch><location><host>h{i}.example.com</host></location></locationMatch>"
+        for i in range(MAX_LIST_ITEMS + 25)
+    )
+    proxy = f"<sslLocations><locationPatterns>{hosts}</locationPatterns></sslLocations>"
+
+    listed = summarize_config(_write(tmp_path, _minimal("", proxy)))["ssl_proxying"]["hosts"]
+
+    assert len(listed) == MAX_LIST_ITEMS + 1
+    assert listed[-1] == "… and 25 more, not listed"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"<configuration><broken SENTINEL-CONTENT",
+        b"\xff\xfe<configuration/> SENTINEL-CONTENT",
+        b"<!DOCTYPE c [<!ENTITY a 'SENTINEL-CONTENT'>]><configuration>&a;</configuration>",
+        b"<configuration><!DOCTYPE x [<!ENTITY a 'aaaa'><!ENTITY b '&a;&a;&a;'>]>&b;</configuration>",
+    ],
+    ids=["malformed", "not-utf8", "external-prolog-entity", "entity-expansion"],
+)
+def test_broken_and_hostile_files_fail_without_quoting_their_content(
+    tmp_path: Path, content: bytes
+) -> None:
+    from charles_mcp.mocks.charles_config import CharlesConfigError
+
+    path = tmp_path / "charles.config"
+    path.write_bytes(content)
+
+    with pytest.raises(CharlesConfigError) as error:
+        summarize_config(path)
+    assert "SENTINEL" not in str(error.value)
+
+
+def test_an_unreadable_file_is_a_plain_error(tmp_path: Path) -> None:
+    from charles_mcp.mocks.charles_config import CharlesConfigError
+
+    path = _write(tmp_path, _minimal(""))
+    path.chmod(0)
+    try:
+        if path.open("rb").readable():  # running as root: nothing to test
+            pytest.skip("file permissions are not enforced for this user")
+    except PermissionError:
+        pass
+    try:
+        with pytest.raises(CharlesConfigError, match="cannot read"):
+            summarize_config(path)
+    finally:
+        path.chmod(0o600)

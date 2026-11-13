@@ -13,7 +13,10 @@ first: they are the ones a client or an agent can trip over.
   Interface state. Each Map Remote mapping names its problems (a URL in the Host field, a
   host SSL Proxying does not cover, a local destination nothing listens on). The license,
   Web Interface users and passwords, Rewrite values and upstream proxy settings are never
-  returned, so agents no longer need to open the file, and are told not to.
+  returned, so agents no longer need to open the file, and are told not to. Mapping
+  locations come back cleaned: query values as `…`, no `user:password@`.
+- **The Charles config loader refuses files over 2 MB** and reports unreadable, non-UTF-8
+  and malformed files as one plain error that never quotes their content.
 - **Install without cloning.** `uvx --from git+https://github.com/ExQA/charles-mcp charles-mcp`
   fetches, builds and runs the server; every client config in the README now uses it. The
   source checkout and the offline archive stay for development and machines without network.
